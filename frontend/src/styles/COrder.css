@@ -1,0 +1,620 @@
+/* COrder.css - Wishlist display styles with grouped shops, image sliders, and quantity selectors */
+
+.corder-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.corder-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #e8e8e8;
+}
+
+.corder-empty {
+  text-align: center;
+  padding: 60px 20px;
+  background: #f9f9f9;
+  border-radius: 12px;
+  border: 2px dashed #ddd;
+}
+
+.corder-empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.corder-empty-text {
+  color: #666;
+  font-size: 16px;
+}
+
+/* Shop Section */
+.corder-shop-section {
+  margin-bottom: 32px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.corder-shop-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.corder-shop-icon {
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.corder-shop-name {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.corder-shop-type {
+  font-size: 12px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  margin-left: auto;
+  text-transform: capitalize;
+}
+
+.corder-shop-products {
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.corder-shop-footer {
+  padding: 16px 20px;
+  background: #f8f9fa;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.corder-order-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  font-size: 16px;
+}
+
+/* Product Card */
+.corder-product-card {
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #eee;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.corder-product-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+}
+
+/* Image Slider */
+.corder-image-slider {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+  background: #f5f5f5;
+}
+
+.corder-slider-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: none;
+}
+
+.corder-slider-image.active {
+  display: block;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Slider Navigation Arrows */
+.corder-slider-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.9);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.corder-slider-arrow:hover {
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.corder-slider-arrow.prev {
+  left: 8px;
+}
+
+.corder-slider-arrow.next {
+  right: 8px;
+}
+
+.corder-slider-arrow svg {
+  width: 20px;
+  height: 20px;
+  color: #333;
+}
+
+/* Slider Dots */
+.corder-slider-dots {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+
+.corder-slider-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.6);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.corder-slider-dot.active {
+  background: white;
+  transform: scale(1.2);
+}
+
+.corder-slider-dot:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+/* Image Counter */
+.corder-image-counter {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  z-index: 10;
+}
+
+/* Product Details */
+.corder-product-details {
+  padding: 16px;
+}
+
+.corder-product-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin: 0 0 12px 0;
+  line-height: 1.4;
+}
+
+.corder-product-stock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.corder-stock-label {
+  color: #666;
+}
+
+.corder-stock-value {
+  color: #10b981;
+  font-weight: 600;
+}
+
+/* Quantity Selector */
+.corder-quantity-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8f9fa;
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+
+.corder-quantity-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.corder-quantity-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.corder-qty-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.corder-qty-btn:hover:not(:disabled) {
+  background: #667eea;
+  color: white;
+}
+
+.corder-qty-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.corder-qty-value {
+  font-size: 18px;
+  font-weight: 600;
+  min-width: 30px;
+  text-align: center;
+  color: #1a1a2e;
+}
+
+/* Remove Button */
+.corder-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.corder-remove-btn:hover {
+  background: #fecaca;
+  border-color: #fca5a5;
+  transform: translateY(-1px);
+}
+
+.corder-remove-btn:active {
+  transform: translateY(0);
+}
+
+.corder-remove-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Buttons */
+.corder-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.corder-btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.corder-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.corder-btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.corder-btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+.corder-btn-danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.corder-btn-danger:hover {
+  background: #fecaca;
+}
+
+/* Modal Styles */
+.corder-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.corder-modal-content {
+  background: white;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.corder-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #eee;
+}
+
+.corder-modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #1a1a2e;
+}
+
+.corder-modal-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #999;
+  padding: 4px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.corder-modal-close:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.corder-modal-body {
+  padding: 24px;
+}
+
+.corder-modal-body h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.corder-order-summary {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px 0;
+  background: #f8f9fa;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.corder-order-summary li {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.corder-order-summary li:last-child {
+  border-bottom: none;
+}
+
+.corder-pickup-section {
+  background: #f8f9fa;
+  padding: 16px;
+  border-radius: 10px;
+}
+
+.corder-pickup-section h4 {
+  margin-bottom: 16px;
+}
+
+.corder-pickup-fields {
+  display: flex;
+  gap: 16px;
+}
+
+.corder-pickup-field {
+  flex: 1;
+}
+
+.corder-pickup-field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 6px;
+}
+
+.corder-pickup-field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.corder-pickup-field input:focus {
+  border-color: #667eea;
+}
+
+.corder-modal-footer {
+  display: flex;
+  gap: 12px;
+  padding: 20px 24px;
+  border-top: 1px solid #eee;
+  background: #f8f9fa;
+}
+
+.corder-modal-footer .corder-btn {
+  flex: 1;
+  padding: 12px 20px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .corder-container {
+    padding: 12px;
+  }
+
+  .corder-title {
+    font-size: 20px;
+  }
+
+  .corder-shop-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .corder-shop-name {
+    font-size: 16px;
+    order: 2;
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .corder-shop-type {
+    margin-left: auto;
+    order: 3;
+  }
+
+  .corder-shop-products {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .corder-shop-footer {
+    padding: 12px;
+  }
+
+  .corder-order-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .corder-image-slider {
+    height: 180px;
+  }
+
+  .corder-slider-arrow {
+    width: 32px;
+    height: 32px;
+  }
+
+  .corder-quantity-selector {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .corder-pickup-fields {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .corder-modal-content {
+    margin: 10px;
+    max-height: calc(100vh - 20px);
+  }
+}
+
+@media (max-width: 480px) {
+  .corder-image-slider {
+    height: 160px;
+  }
+
+  .corder-product-details {
+    padding: 12px;
+  }
+
+  .corder-modal-footer {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .corder-modal-footer .corder-btn {
+    width: 100%;
+  }
+}
+

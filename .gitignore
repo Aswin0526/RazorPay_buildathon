@@ -1,0 +1,19 @@
+./chatbot/chatbot
+
+# Ignore Windows virtualenv internals anywhere
+**/Lib/
+**/Scripts/
+**/Include/
+**/pyvenv.cfg
+**/share/
+
+# Ignore common venv names
+venv/
+.venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+.env

@@ -1,0 +1,805 @@
+/* ─── Voice Modal Overlay ────────────────────────────────────────────────── */
+.voice-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(5px);
+}
+
+/* ─── Modal Container ────────────────────────────────────────────────────── */
+.voice-modal {
+  width: 100%;
+  max-width: 100%;
+  height: 100vh;
+  background: linear-gradient(160deg, #2d0060 0%, #4b0082 30%, #6610f2 65%, #6f42c1 100%);
+  border-radius: 0;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: voiceModalSlideIn 0.4s ease-out;
+}
+
+.voice-page-wrapper {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #120627;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-page-container {
+  width: 100%;
+  height: 100vh;
+  background: linear-gradient(160deg, #2d0060 0%, #4b0082 30%, #6610f2 65%, #6f42c1 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.voice-messages {
+  width: 100%;
+  max-width: 720px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.14);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.voice-message {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: #f4f7ff;
+}
+
+.voice-message-user {
+  align-self: flex-end;
+  background: rgba(0, 160, 130, 0.8);
+}
+
+.voice-message-bot {
+  align-self: flex-start;
+  background: rgba(20, 20, 80, 0.8);
+}
+
+.voice-empty-message {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.voice-text-input-bar {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.voice-text-input {
+  flex: 1;
+  height: 44px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.15);
+  color: white;
+  padding: 0 12px;
+  font-size: 16px;
+  outline: none;
+}
+
+.voice-text-input::placeholder {
+  color: rgba(255,255,255,0.6);
+}
+
+.voice-text-send-btn {
+  min-width: 80px;
+  padding: 10px 14px;
+  border-radius: 20px;
+  border: none;
+  background: #24d997;
+  color: #111;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.voice-text-send-btn:hover:not(:disabled) {
+  transform: scale(1.03);
+}
+
+.voice-text-send-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@keyframes voiceModalSlideIn {
+  from { opacity: 0; transform: translateY(-30px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+/* ─── Header bar ─────────────────────────────────────────────────────────── */
+.voice-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 60px 0 60px;
+  position: relative;
+  min-height: 64px;
+}
+
+.voice-header-title {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+/* Close Button */
+.voice-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: white;
+  font-size: 28px;
+  font-weight: bold;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 10;
+  line-height: 1;
+}
+
+.voice-modal-close:hover {
+  background: rgba(255, 255, 255, 0.35);
+  transform: rotate(90deg);
+}
+
+/* ─── Scrollable content area ────────────────────────────────────────────── */
+.voice-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 32px 32px 32px;
+  gap: 20px;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.2) transparent;
+}
+
+.voice-content::-webkit-scrollbar {
+  width: 4px;
+}
+.voice-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.voice-content::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+  border-radius: 4px;
+}
+
+/* ─── Top section (mic + status) always visible ──────────────────────────── */
+.voice-top-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+/* ─── Microphone Button ──────────────────────────────────────────────────── */
+.voice-mic-button {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10a37f, #1a7f64);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 32px rgba(16, 163, 127, 0.45);
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.voice-mic-button:hover {
+  transform: scale(1.06);
+  box-shadow: 0 12px 40px rgba(16, 163, 127, 0.55);
+}
+
+.voice-mic-button:active {
+  transform: scale(0.95);
+}
+
+.voice-mic-icon {
+  width: 46px;
+  height: 46px;
+  color: white;
+  transition: all 0.3s ease;
+}
+
+.voice-mic-icon.recording {
+  animation: voicePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes voicePulse {
+  0%, 100% { transform: scale(1);   opacity: 1;   }
+  50%       { transform: scale(1.1); opacity: 0.8; }
+}
+
+/* ─── Status Text ────────────────────────────────────────────────────────── */
+.voice-status {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 18px;
+  font-weight: 500;
+  text-align: center;
+  margin: 0;
+}
+
+/* ─── Stop & Listen Button ───────────────────────────────────────────────── */
+.voice-stop-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 26px;
+  border-radius: 30px;
+  background: linear-gradient(135deg, #ff5252, #d32f2f);
+  border: none;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(255, 82, 82, 0.4);
+  transition: all 0.3s ease;
+  animation: stopPulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes stopPulse {
+  0%, 100% { box-shadow: 0 6px 20px rgba(255, 82, 82, 0.4); }
+  50%       { box-shadow: 0 6px 28px rgba(255, 82, 82, 0.65); }
+}
+
+.voice-stop-button:hover {
+  transform: scale(1.05);
+}
+.voice-stop-button:active {
+  transform: scale(0.97);
+}
+
+.voice-stop-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.voice-stop-text {
+  letter-spacing: 0.4px;
+}
+
+/* ─── Image Request Banner ───────────────────────────────────────────────── */
+.voice-image-request {
+  width: 100%;
+  max-width: 520px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.45);
+  border-radius: 14px;
+  padding: 14px 18px;
+  text-align: center;
+  animation: bannerFadeIn 0.4s ease;
+}
+
+@keyframes bannerFadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.voice-image-request-msg {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #e2e8f0;
+  margin: 0 0 5px 0;
+  line-height: 1.5;
+}
+
+.voice-image-hint {
+  font-size: 0.74rem;
+  color: rgba(255,255,255,0.5);
+  margin: 0;
+}
+
+/* ─── Image Section ──────────────────────────────────────────────────────── */
+.voice-image-section {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 14px;
+  transition: all 0.35s ease;
+  padding: 4px;
+}
+
+/* Active state — bot is waiting for image */
+.voice-image-section--active {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1.5px dashed rgba(102, 126, 234, 0.6);
+  padding: 16px;
+}
+
+/* Upload button — idle */
+.voice-image-upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  font-size: 0.83rem;
+  padding: 10px 18px;
+  transition: all 0.25s ease;
+}
+
+.voice-image-upload-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: white;
+}
+
+/* Upload button — pulsing when bot is waiting */
+.voice-image-upload-btn--pulse {
+  border-color: #a78bfa;
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.1);
+  animation: uploadPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes uploadPulse {
+  0%, 100% { box-shadow: 0 0 0 0   rgba(167, 139, 250, 0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(167, 139, 250, 0);   }
+}
+
+/* ─── Image Preview ──────────────────────────────────────────────────────── */
+.voice-image-preview-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.voice-image-preview {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid rgba(255,255,255,0.2);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+}
+
+.voice-image-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.voice-image-remove-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 8px;
+  color: #fca5a5;
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 6px 14px;
+  transition: all 0.2s;
+}
+
+.voice-image-remove-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #fecaca;
+}
+
+/* Send Photo CTA */
+.voice-image-send-btn {
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 6px 18px;
+  letter-spacing: 0.3px;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
+  transition: all 0.2s;
+}
+
+.voice-image-send-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.55);
+}
+
+.voice-image-send-btn:active {
+  transform: translateY(0);
+}
+
+/* ─── Transcript ─────────────────────────────────────────────────────────── */
+.voice-transcript-container {
+  width: 100%;
+  max-width: 560px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 18px 24px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.voice-transcript {
+  color: white;
+  font-size: 17px;
+  line-height: 1.65;
+  margin: 0;
+  word-break: break-word;
+}
+
+.voice-interim {
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+}
+
+/* ─── Mute Button ────────────────────────────────────────────────────────── */
+.voice-controls {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.voice-mute-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.voice-mute-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.voice-mute-btn.muted {
+  background: rgba(255, 82, 82, 0.25);
+  border-color: rgba(255, 82, 82, 0.5);
+}
+
+.voice-mute-btn.muted:hover {
+  background: rgba(255, 82, 82, 0.4);
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .voice-content {
+    padding: 16px 18px 28px 18px;
+    gap: 16px;
+  }
+
+  .voice-mic-button {
+    width: 96px;
+    height: 96px;
+  }
+
+  .voice-mic-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .voice-status {
+    font-size: 16px;
+  }
+
+  .voice-transcript-container {
+    padding: 14px 16px;
+  }
+
+  .voice-transcript {
+    font-size: 15px;
+  }
+
+  .voice-image-preview {
+    width: 100px;
+    height: 100px;
+  }
+
+  .voice-stop-button {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+}
+
+/* ─── Analysing Overlay ──────────────────────────────────────────────────── */
+.voice-analysing-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 0, 50, 0.82);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.voice-analysing-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 36px 48px;
+  text-align: center;
+}
+
+.voice-analysing-spinner {
+  width: 44px;
+  height: 44px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: #a78bfa;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.voice-analysing-title {
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.voice-analysing-sub {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ─── Wishlist Dialog — append to Voice.css ──────────────────────────────── */
+
+.wl-dialog-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 0, 30, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: flex-end;       /* slide up from bottom */
+  justify-content: center;
+  z-index: 15;
+  animation: wlFadeIn 0.25s ease;
+}
+
+@keyframes wlFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.wl-dialog {
+  width: 100%;
+  background: #1a1030;
+  border-top: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: wlSlideUp 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);
+  max-height: 72%;
+}
+
+@keyframes wlSlideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* Header row */
+.wl-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wl-dialog-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.wl-dialog-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.wl-dialog-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 3px 0 0;
+}
+
+.wl-dialog-close {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.wl-dialog-close:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+/* Product list */
+.wl-product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: 320px;
+  padding-right: 2px;
+}
+
+.wl-product-list::-webkit-scrollbar { width: 4px; }
+.wl-product-list::-webkit-scrollbar-track { background: transparent; }
+.wl-product-list::-webkit-scrollbar-thumb { background: rgba(167,139,250,.3); border-radius: 4px; }
+
+.wl-empty {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 13px;
+  text-align: center;
+  padding: 20px 0;
+}
+
+/* Individual product card */
+.wl-product-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.wl-product-card:hover,
+.wl-product-card:focus {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(167, 139, 250, 0.5);
+  outline: none;
+}
+
+.wl-product-card:active {
+  transform: scale(0.98);
+}
+
+.wl-product-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wl-product-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wl-product-brand {
+  font-size: 11px;
+  color: rgba(167, 139, 250, 0.8);
+}
+
+.wl-product-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.wl-product-price {
+  font-size: 14px;
+  font-weight: 700;
+  color: #a78bfa;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Cancel button */
+.wl-cancel-btn {
+  width: 100%;
+  padding: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.wl-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+}

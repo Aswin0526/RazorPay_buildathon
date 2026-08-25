@@ -1,0 +1,21 @@
+# Web Framework
+flask
+flask-cors
+
+# Environment & Configuration
+python-dotenv
+
+# AI & LLM (Modern Stack)
+google-genai
+langchain-core
+langchain-community
+langchain-google-genai
+langgraph
+toolbox-core
+
+# Database & ORM
+sqlalchemy
+psycopg2-binary
+
+# Utilities
+python-dateutil

@@ -1,0 +1,29 @@
+kind: source
+name: shopmate_source
+type: postgres
+host: aws-1-ap-south-1.pooler.supabase.com
+port: 5432
+database: postgres
+user: postgres.gxjaypcnhniwmjjbyolg
+password: ShopMate@123
+
+---
+
+kind: tool
+name: execute_sql
+type: postgres-sql
+source: shopmate_source
+description: Execute a safe SELECT query against the shop database.
+parameters:
+  - name: sql
+    type: string
+    description: SQL SELECT query
+statement: |
+  {{ .sql }}
+
+---
+
+kind: toolset
+name: shopmate
+tools:
+  - execute_sql 

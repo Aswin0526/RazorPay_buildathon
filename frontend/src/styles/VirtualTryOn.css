@@ -1,0 +1,213 @@
+.vto-page {
+  padding: 32px 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  color: #1f2937;
+}
+
+.vto-page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.vto-back-btn {
+  border: none;
+  background: transparent;
+  color: #374151;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 10px 14px;
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+
+.vto-back-btn:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.vto-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 28px;
+}
+
+.vto-panel {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+  padding: 22px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+}
+
+.vto-panel h2 {
+  margin-bottom: 18px;
+  font-size: 1.15rem;
+  color: #111827;
+}
+
+.vto-card {
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  padding: 16px;
+  background: #f8fafc;
+}
+
+.vto-garment-image,
+.vto-user-preview img,
+.vto-result-card img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 18px;
+}
+
+.vto-upload-card {
+  flex-direction: column;
+  display: grid;
+  gap: 16px;
+}
+
+.vto-upload-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  border: 2px dashed #cbd5e1;
+  border-radius: 18px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.vto-upload-label:hover {
+  border-color: #6366f1;
+  background: #f8f8ff;
+}
+
+.vto-upload-content {
+  display: grid;
+  gap: 8px;
+  color: #334155;
+}
+
+.vto-upload-icon {
+  font-size: 28px;
+}
+
+.vto-upload-label small {
+  color: #64748b;
+}
+
+.vto-user-preview {
+  border-radius: 18px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+}
+
+.vto-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.vto-cta-btn,
+.vto-secondary-btn,
+.vto-download-btn {
+  border: none;
+  border-radius: 9999px;
+  padding: 14px 24px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.vto-cta-btn {
+  background: linear-gradient(135deg, #4f46e5, #8b5cf6);
+  color: #fff;
+}
+
+.vto-secondary-btn {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.vto-cta-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.vto-message.error {
+  color: #b91c1c;
+  margin-bottom: 20px;
+  background: #fef2f2;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid #fecaca;
+}
+
+.vto-progress {
+  height: 10px;
+  width: 100%;
+  background: #e5e7eb;
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-bottom: 22px;
+}
+
+.vto-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4f46e5, #a855f7);
+  transition: width 0.25s ease;
+}
+
+.vto-result-section {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  padding: 24px;
+  border-radius: 20px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.06);
+}
+
+.vto-result-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.vto-result-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.vto-result-card {
+  border-radius: 20px;
+  overflow: hidden;
+  background: #f8fafc;
+  padding: 18px;
+}
+
+.vto-result-card img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.vto-download-btn {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+@media (max-width: 900px) {
+  .vto-grid {
+    grid-template-columns: 1fr;
+  }
+}

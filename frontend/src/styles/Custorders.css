@@ -1,0 +1,500 @@
+/* Custorders.css - Modern Customer Orders Display Styles */
+
+:root {
+  --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --primary-color: #667eea;
+  --primary-hover: #5a6fd6;
+  --secondary-color: #764ba2;
+  --background-color: #f5f7fa;
+  --card-background: #fff;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --text-muted: #999;
+  --border-color: #e8e8e8;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+
+  /* Status colors */
+  --status-pending: #ff9800;
+  --status-confirmed: #2196f3;
+  --status-preparing: #9c27b0;
+  --status-ready: #4CAF50;
+  --status-completed: #607d8b;
+  --status-cancelled: #f44336;
+}
+
+.custorders-container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px;
+  min-height: 100vh;
+  background-color: var(--background-color);
+}
+
+.custorders-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 24px 0;
+  padding-bottom: 16px;
+  border-bottom: 3px solid var(--primary-color);
+  display: inline-block;
+}
+
+/* Loading State */
+.custorders-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+}
+
+.custorders-loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid var(--border-color);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Empty State */
+.custorders-empty {
+  text-align: center;
+  padding: 80px 24px;
+  background: var(--card-background);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 2px dashed var(--border-color);
+}
+
+.custorders-empty-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  opacity: 0.5;
+}
+
+.custorders-empty-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.custorders-empty-text {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Orders List */
+.custorders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Order Card */
+.custorders-card {
+  background: var(--card-background);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.custorders-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Card Header */
+.custorders-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.custorders-shop-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.custorders-shop-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--primary-gradient);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 20px;
+  font-weight: bold;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.custorders-shop-details h3 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.custorders-order-date {
+  font-size: 13px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Status Badge */
+.custorders-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+}
+
+.custorders-status-pending {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.custorders-status-confirmed {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.custorders-status-preparing {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.custorders-status-ready {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.custorders-status-completed {
+  background: #eceff1;
+  color: #455a64;
+}
+
+.custorders-status-cancelled {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.custorders-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Card Body */
+.custorders-card-body {
+  padding: 24px;
+}
+
+/* Pickup Info */
+.custorders-pickup-info {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: var(--radius-sm);
+  flex-wrap: wrap;
+}
+
+.custorders-pickup-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.custorders-pickup-icon {
+  width: 36px;
+  height: 36px;
+  background: white;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.custorders-pickup-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.custorders-pickup-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Note */
+.custorders-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #fff8e1;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid #ffc107;
+  margin-bottom: 20px;
+}
+
+.custorders-note-icon {
+  color: #f57c00;
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.custorders-note-text {
+  font-size: 14px;
+  color: #5d4037;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.custorders-note-label {
+  font-weight: 600;
+  color: #e65100;
+}
+
+/* Products List */
+.custorders-products-section {
+  margin-bottom: 16px;
+}
+
+.custorders-products-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.custorders-products-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.custorders-product-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: #fafafa;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.custorders-product-item:hover {
+  background: #f0f0f0;
+}
+
+.custorders-product-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.custorders-product-check {
+  width: 22px;
+  height: 22px;
+  background: var(--primary-gradient);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.custorders-product-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.custorders-product-quantity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custorders-qty-badge {
+  background: var(--primary-gradient);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+  min-width: 32px;
+  text-align: center;
+}
+
+.custorders-qty-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* Card Footer */
+.custorders-card-footer {
+  padding: 16px 24px;
+  background: #fafafa;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.custorders-order-id {
+  font-size: 13px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .custorders-container {
+    padding: 16px;
+  }
+
+  .custorders-title {
+    font-size: 24px;
+    margin-bottom: 20px;
+  }
+
+  .custorders-card-header {
+    padding: 16px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .custorders-shop-info {
+    width: 100%;
+  }
+
+  .custorders-card-body {
+    padding: 16px;
+  }
+
+  .custorders-pickup-info {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .custorders-pickup-item {
+    width: 100%;
+  }
+
+  .custorders-product-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .custorders-product-quantity {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .custorders-card-footer {
+    padding: 12px 16px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .custorders-title {
+    font-size: 22px;
+  }
+
+  .custorders-shop-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .custorders-shop-details h3 {
+    font-size: 16px;
+  }
+
+  .custorders-status {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .custorders-pickup-info {
+    padding: 12px;
+  }
+
+  .custorders-pickup-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .custorders-pickup-value {
+    font-size: 14px;
+  }
+}
+
