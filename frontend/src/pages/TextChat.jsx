@@ -19,7 +19,7 @@ function TextChat({ onClose, isPage = false }) {
   const [imagePromptMsg, setImagePromptMsg] = useState("");
   const fileInputRef = useRef(null);
 
-  // ── Wishlist / cart state ─────────────────────────────────────────────────
+  // ── Wishlist / cart / spending limit state ─────────────────────────────────
   const [wishlistProducts, setWishlistProducts] = useState([]);
   const [showWishlistDialog, setShowWishlistDialog] = useState(false);
   const [cartProducts, setCartProducts] = useState([]);
@@ -27,6 +27,7 @@ function TextChat({ onClose, isPage = false }) {
   const [showCartDialog, setShowCartDialog] = useState(false);
   const [selectedCartProduct, setSelectedCartProduct] = useState(null);
   const [cartQuantity, setCartQuantity] = useState(1);
+  const [spendingLimit, setSpendingLimit] = useState(null);
 
   // ── Session ID ───────────────────────────────────────────────────────────
   const getSessionId = useCallback(() => {
@@ -43,6 +44,79 @@ function TextChat({ onClose, isPage = false }) {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // ── Razorpay Checkout Handler ─────────────────────────────────────────────
+  const triggerRazorpayCheckout = useCallback((checkoutAction) => {
+    if (!checkoutAction || checkoutAction.action !== "TRIGGER_RAZORPAY_CHECKOUT") return;
+    const { key_id, order_id, amount, currency } = checkoutAction.data || {};
+
+    if (!window.Razorpay) {
+      alert("Razorpay checkout script is still loading. Please try again in a few seconds.");
+      return;
+    }
+
+    const options = {
+      key: key_id,
+      amount: amount,
+      currency: currency || "INR",
+      name: "ShopMate",
+      description: "Order Checkout (Single Portal)",
+      order_id: order_id,
+      handler: async function (response) {
+        try {
+          const verifyRes = await fetch(`${import.meta.env.VITE_CHATBOT_URL}/payment/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_order_id: response.razorpay_order_id || order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature
+            })
+          });
+          const verifyData = await verifyRes.json();
+          if (verifyRes.ok && verifyData.status === "PAID") {
+            const session_id = getSessionId();
+            await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart/clear`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Session-ID": session_id }
+            }).catch(() => {});
+            setCartProducts([]);
+            setMessages(prev => [...prev, {
+              id: Date.now() + 2,
+              sender: 'bot',
+              text: `🎉 **Payment Successful!**\nYour order has been placed.\n**Payment ID:** ${response.razorpay_payment_id}\n**Order ID:** ${order_id}`
+            }]);
+          } else {
+            setMessages(prev => [...prev, {
+              id: Date.now() + 2,
+              sender: 'bot',
+              text: `⚠️ Payment verification failed: ${verifyData.error || "Please contact support"}`
+            }]);
+          }
+        } catch (err) {
+          console.error("Verification error:", err);
+        }
+      },
+      prefill: {
+        name: "ShopMate Customer",
+        email: "customer@shopmate.ai",
+        contact: "9999999999"
+      },
+      theme: {
+        color: "#2563eb"
+      }
+    };
+
+    const rzp = new window.Razorpay(options);
+    rzp.on('payment.failed', function (resp) {
+      setMessages(prev => [...prev, {
+        id: Date.now() + 2,
+        sender: 'bot',
+        text: `❌ **Payment Failed:** ${resp.error?.description || "Transaction declined"}`
+      }]);
+    });
+    rzp.open();
+  }, [getSessionId]);
 
   // ── Image handlers ───────────────────────────────────────────────────────
   const handleImageUpload = (event) => {
@@ -99,16 +173,27 @@ function TextChat({ onClose, isPage = false }) {
         needs_cart: needsCart,
         cart_products: cProducts = [],
         should_speak: shouldSpeak = true,
+        checkout_action: checkoutAction = null,
+        spending_limit: updatedLimit = null
       } = data;
+
+      if (updatedLimit !== null && updatedLimit !== undefined) {
+        setSpendingLimit(updatedLimit);
+      }
 
       if (image) removeImage();
 
-      // ── Wishlist dialog ──────────────────────────────────────────────
+      // ── Trigger Razorpay modal if checkout action present ───────────────
+      if (checkoutAction) {
+        triggerRazorpayCheckout(checkoutAction);
+      }
+
+      // ── Wishlist dialog ─────────────────────────────────────────────────
       if (needsWishlist && wProducts.length > 0) {
         setWishlistProducts(wProducts);
         setShowWishlistDialog(true);
         setIsLoading(false);
-        if (shouldSpeak && responseText) {
+        if (responseText) {
           setMessages(prev => [...prev, {
             id: Date.now() + 1,
             sender: 'bot',
@@ -118,18 +203,24 @@ function TextChat({ onClose, isPage = false }) {
         return;
       }
 
+      // ── Cart dialog ─────────────────────────────────────────────────────
       if (needsCart && cProducts.length > 0) {
-        setCartSearchResults(cProducts);
-        setCartProducts([]);
-        setSelectedCartProduct(null);
+        if (cProducts.length === 1) {
+          setSelectedCartProduct(cProducts[0]);
+          setCartSearchResults([]);
+        } else {
+          setCartSearchResults(cProducts);
+          setSelectedCartProduct(null);
+        }
         setCartQuantity(1);
         setShowCartDialog(true);
         setIsLoading(false);
-        if (shouldSpeak && responseText) {
+        if (responseText) {
           setMessages(prev => [...prev, {
             id: Date.now() + 1,
             sender: 'bot',
-            text: responseText
+            text: responseText,
+            recommendations: data.recommendations || []
           }]);
         }
         return;
@@ -151,7 +242,8 @@ function TextChat({ onClose, isPage = false }) {
         setMessages(prev => [...prev, {
           id: Date.now() + 1,
           sender: 'bot',
-          text: responseText
+          text: responseText,
+          recommendations: data.recommendations || []
         }]);
       }
     } catch (err) {
@@ -164,7 +256,7 @@ function TextChat({ onClose, isPage = false }) {
     } finally {
       setIsLoading(false);
     }
-  }, [getSessionId]);
+  }, [getSessionId, triggerRazorpayCheckout]);
 
   // ── Handle send ──────────────────────────────────────────────────────────
   const handleSend = () => {
@@ -246,13 +338,15 @@ function TextChat({ onClose, isPage = false }) {
       if (!res.ok) return;
       const data = await res.json();
       setCartProducts(data.cart_items || []);
-      setCartSearchResults([]);
-      setSelectedCartProduct(null);
-      setCartQuantity(1);
     } catch (err) {
       console.error("Cart fetch error:", err);
     }
   }, [getSessionId]);
+
+  // ── Sync cart on mount ───────────────────────────────────────────────────
+  useEffect(() => {
+    fetchCartItems();
+  }, [fetchCartItems]);
 
   const handleCartSelect = useCallback((product) => {
     setSelectedCartProduct(product);
@@ -262,39 +356,61 @@ function TextChat({ onClose, isPage = false }) {
   const handleCartConfirm = useCallback(async () => {
     if (!selectedCartProduct) return;
     const session_id = getSessionId();
+    // Capture local copies before resetting state
+    const productToAdd = selectedCartProduct;
+    const qtyToAdd = cartQuantity || 1;
+
+    // Dismiss dialog immediately so the user isn't stuck waiting
+    setShowCartDialog(false);
+    setCartSearchResults([]);
+    setSelectedCartProduct(null);
+    setCartQuantity(1);
+
     try {
-      await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart/add`, {
+      const addRes = await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart/add`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Session-ID": session_id
         },
         body: JSON.stringify({
-          product_id: selectedCartProduct.product_id,
-          product_name: selectedCartProduct.product_name,
-          price: selectedCartProduct.price,
-          brand: selectedCartProduct.brand,
-          description: selectedCartProduct.description,
-          category: selectedCartProduct.category,
-          quantity: cartQuantity || 1
+          product_id:   productToAdd.product_id,
+          product_name: productToAdd.product_name,
+          price:        productToAdd.price,
+          brand:        productToAdd.brand,
+          description:  productToAdd.description,
+          category:     productToAdd.category,
+          quantity:     qtyToAdd,
+          shop_id:      productToAdd.shop_id,
+          shop_name:    productToAdd.shop_name,
+          shop_city:    productToAdd.shop_city,
+          shop_type:    productToAdd.shop_type
         })
       });
-      const res = await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart`, {
-        method: "GET",
-        headers: { "X-Session-ID": session_id }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCartProducts(data.cart_items || []);
+      if (addRes.ok) {
+        const addData = await addRes.json();
+        // ── Merge server cart into local state (never replace) ────────────
+        if (addData.cart_items) {
+          setCartProducts(addData.cart_items);
+        }
+        // ── Show upsell/confirmation bot message ──────────────────────────
+        const botText = addData.upsell_prompt || addData.recommendation_text ||
+          `✅ Added ${productToAdd.product_name} × ${qtyToAdd} to your cart!`;
+        setMessages(prev => [...prev, {
+          id: Date.now() + 1,
+          sender: 'bot',
+          text: botText,
+          recommendations: addData.recommendations || []
+        }]);
       }
     } catch (err) {
       console.error("Add to cart error:", err);
+      setMessages(prev => [...prev, {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: "Sorry, there was a problem adding that item to your cart. Please try again."
+      }]);
     }
-
-    setShowCartDialog(false);
-    setCartSearchResults([]);
-    setSelectedCartProduct(null);
-    setCartQuantity(1);
   }, [cartQuantity, getSessionId, selectedCartProduct]);
 
   const handleCartRemove = useCallback(async (productId) => {
@@ -326,6 +442,8 @@ function TextChat({ onClose, isPage = false }) {
   // ── Handle close ─────────────────────────────────────────────────────────
   const handleOpenCart = useCallback(async () => {
     await fetchCartItems();
+    setSelectedCartProduct(null);
+    setCartSearchResults([]);
     setShowCartDialog(true);
   }, [fetchCartItems]);
 
@@ -399,7 +517,14 @@ function TextChat({ onClose, isPage = false }) {
         <button className="textchat-back-btn" onClick={handleClose}>
           ← Back
         </button>
-        <h1 className="textchat-title">ShopMate Chat</h1>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <h1 className="textchat-title">ShopMate Chat</h1>
+          {spendingLimit !== null && (
+            <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 600, background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: '12px' }}>
+              Limit: ₹{Number(spendingLimit).toLocaleString()}
+            </span>
+          )}
+        </div>
         <div className="textchat-spacer"></div>
       </div>
 
@@ -422,6 +547,73 @@ function TextChat({ onClose, isPage = false }) {
                   <img src={msg.image} alt="Uploaded" className="textchat-image" />
                 )}
                 {renderMessageText(msg.text)}
+                {msg.recommendations && msg.recommendations.length > 0 && (
+                  <div className="textchat-rec-container" style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary, #666)' }}>
+                      💡 Recommended for you:
+                    </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {msg.recommendations.map((rec, rIdx) => (
+                        <button
+                          key={rec.product_id || rIdx}
+                          onClick={async () => {
+                            // Search for fresh product details then open quantity dialog
+                            const session_id = getSessionId();
+                            try {
+                              const res = await fetch(
+                                `${import.meta.env.VITE_CHATBOT_URL}/product/search?keyword=${encodeURIComponent(rec.product_name || '')}`,
+                                { headers: { "X-Session-ID": session_id } }
+                              );
+                              if (res.ok) {
+                                const d = await res.json();
+                                const found = d.products || [];
+                                if (found.length === 1) {
+                                  // Exact match — go straight to quantity dialog
+                                  setSelectedCartProduct(found[0]);
+                                  setCartSearchResults([]);
+                                } else if (found.length > 1) {
+                                  // Multiple matches — show disambiguation list
+                                  setCartSearchResults(found);
+                                  setSelectedCartProduct(null);
+                                } else {
+                                  // Nothing found — use rec data directly
+                                  setSelectedCartProduct(rec);
+                                  setCartSearchResults([]);
+                                }
+                              } else {
+                                // API error — use rec data directly
+                                setSelectedCartProduct(rec);
+                                setCartSearchResults([]);
+                              }
+                            } catch {
+                              // Network error — use rec data directly
+                              setSelectedCartProduct(rec);
+                              setCartSearchResults([]);
+                            }
+                            setCartQuantity(1);
+                            setShowCartDialog(true);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '6px 10px',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            border: '1px solid rgba(59, 130, 246, 0.3)',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem',
+                            color: 'inherit',
+                            textAlign: 'left'
+                          }}
+                        >
+                          <span>{rec.rec_type === 'upsell' ? '⚡ Upgrade:' : '➕ Add:'} <strong>{rec.product_name}</strong></span>
+                          {rec.price != null && <span style={{ color: '#2563eb', fontWeight: 600 }}>₹{rec.price}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               {msg.sender === 'user' && (
                 <div className="textchat-avatar user-avatar">👤</div>
@@ -580,8 +772,8 @@ function TextChat({ onClose, isPage = false }) {
             <div className="wishlist-header">
               <span className="wishlist-icon">🛒</span>
               <div>
-                <h3>{selectedCartProduct ? "Set quantity" : "Your cart"}</h3>
-                <p>{selectedCartProduct ? "Choose the quantity to add" : "Products selected for checkout"}</p>
+                <h3>{selectedCartProduct ? "Set quantity" : (cartSearchResults.length > 0 ? "Select product to add" : "Your cart")}</h3>
+                <p>{selectedCartProduct ? "Choose the quantity to add" : (cartSearchResults.length > 0 ? "Tap the product you want to add" : "Products selected for checkout")}</p>
               </div>
               <button className="wishlist-close" onClick={handleCartDismiss}>✕</button>
             </div>
@@ -614,47 +806,66 @@ function TextChat({ onClose, isPage = false }) {
                     Item total: ₹{Number(selectedCartProduct.price || 0) * Number(cartQuantity || 1)}
                   </div>
 
-                  <button className="wishlist-cancel" onClick={handleCartConfirm}>Confirm add to cart</button>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <button className="wishlist-cancel" style={{ flex: 1, background: '#2563eb', color: '#fff' }} onClick={handleCartConfirm}>Confirm add to cart</button>
+                    <button className="wishlist-cancel" style={{ width: 'auto' }} onClick={handleCartDismiss}>Cancel</button>
+                  </div>
                 </div>
+              ) : cartSearchResults.length > 0 ? (
+                /* ── Disambiguation mode: pick the correct product ── */
+                cartSearchResults.map((product, i) => (
+                  <button
+                    key={product.product_id ?? i}
+                    className="wishlist-product"
+                    onClick={() => handleCartSelect(product)}
+                    style={{ textAlign: 'left', width: '100%', border: '1px solid rgba(59,130,246,0.25)', borderRadius: '10px', background: 'transparent', padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <div className="wishlist-product-info">
+                      <span className="wishlist-product-name">{product.product_name}</span>
+                      {product.brand && (
+                        <span className="wishlist-product-brand">{product.brand}</span>
+                      )}
+                      {product.description && (
+                        <span className="wishlist-product-desc">{product.description}</span>
+                      )}
+                    </div>
+                    {product.price != null && (
+                      <span className="wishlist-product-price">₹{product.price}</span>
+                    )}
+                  </button>
+                ))
               ) : (
-                (cartSearchResults.length > 0 ? cartSearchResults : cartProducts).length === 0 ? (
+                /* ── Cart-view mode: show current cart items ── */
+                cartProducts.length === 0 ? (
                   <p className="wishlist-empty">Your cart is empty.</p>
                 ) : (
-                  (cartSearchResults.length > 0 ? cartSearchResults : cartProducts).map((product, i) => (
+                  cartProducts.map((product, i) => (
                     <div key={product.product_id ?? i} className="wishlist-product" style={{ cursor: 'default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', textAlign: 'left' }}>
-                      <button
-                        className="wishlist-product"
-                        onClick={() => handleCartSelect(product)}
-                        style={{ textAlign: 'left', flex: 1, border: 'none', background: 'transparent', padding: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                      >
-                        <div className="wishlist-product-info">
-                          <span className="wishlist-product-name">{product.product_name}</span>
-                          {product.brand && (
-                            <span className="wishlist-product-brand">{product.brand}</span>
-                          )}
-                          {product.description && (
-                            <span className="wishlist-product-desc">{product.description}</span>
-                          )}
-                          <span className="wishlist-product-desc">Qty: {product.quantity || 1}</span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
-                          {product.price != null && (
-                            <span className="wishlist-product-price">₹{product.price}</span>
-                          )}
-                          <span style={{ fontSize: '12px', color: '#666' }}>
-                            Total: ₹{Number(product.price || 0) * Number(product.quantity || 1)}
-                          </span>
-                        </div>
-                      </button>
-                      <button
-                        className="wishlist-cancel"
-                        onClick={async () => {
-                          await handleCartRemove(product.product_id);
-                        }}
-                        style={{ width: 'auto', padding: '6px 10px', marginLeft: '8px' }}
-                      >
-                        Remove
-                      </button>
+                      <div className="wishlist-product-info" style={{ flex: 1 }}>
+                        <span className="wishlist-product-name">{product.product_name}</span>
+                        {product.brand && (
+                          <span className="wishlist-product-brand">{product.brand}</span>
+                        )}
+                        {product.description && (
+                          <span className="wishlist-product-desc">{product.description}</span>
+                        )}
+                        <span className="wishlist-product-desc">Qty: {product.quantity || 1}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                        {product.price != null && (
+                          <span className="wishlist-product-price">₹{product.price}</span>
+                        )}
+                        <span style={{ fontSize: '12px', color: '#666' }}>
+                          Total: ₹{Number(product.price || 0) * Number(product.quantity || 1)}
+                        </span>
+                        <button
+                          className="wishlist-cancel"
+                          onClick={async () => { await handleCartRemove(product.product_id); }}
+                          style={{ width: 'auto', padding: '4px 8px', fontSize: '12px' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ))
                 )
@@ -664,9 +875,21 @@ function TextChat({ onClose, isPage = false }) {
             {!selectedCartProduct && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
                 {cartProducts.length > 0 && (
-                  <div style={{ fontWeight: 700, color: '#1f2937', textAlign: 'right' }}>
-                    Grand Total: ₹{cartTotal}
-                  </div>
+                  <>
+                    <div style={{ fontWeight: 700, color: '#1f2937', textAlign: 'right' }}>
+                      Grand Total: ₹{cartTotal}
+                    </div>
+                    <button
+                      className="wishlist-cancel"
+                      style={{ background: '#10b981', color: '#fff', fontWeight: 600, padding: '10px' }}
+                      onClick={() => {
+                        handleCartDismiss();
+                        sendMessage("Let's checkout");
+                      }}
+                    >
+                      💳 Proceed to Checkout (₹{cartTotal})
+                    </button>
+                  </>
                 )}
                 <button className="wishlist-cancel" onClick={handleCartDismiss}>Close</button>
               </div>

@@ -26,7 +26,7 @@ const Voice = ({ onClose, isPage = false }) => {
   const [imageContext, setImageContext]     = useState("");
   const [imagePromptMsg, setImagePromptMsg] = useState("");
 
-  // ── Wishlist / cart state ─────────────────────────────────────────────────
+  // ── Wishlist / cart / spending limit state ─────────────────────────────────
   const [wishlistProducts, setWishlistProducts]     = useState([]);
   const [showWishlistDialog, setShowWishlistDialog] = useState(false);
   const [cartProducts, setCartProducts]             = useState([]);
@@ -34,6 +34,7 @@ const Voice = ({ onClose, isPage = false }) => {
   const [showCartDialog, setShowCartDialog]         = useState(false);
   const [selectedCartProduct, setSelectedCartProduct] = useState(null);
   const [cartQuantity, setCartQuantity]             = useState(1);
+  const [spendingLimit, setSpendingLimit]           = useState(null);
 
   const lastTranscriptRef      = useRef("");
   const pauseTimeoutRef        = useRef(null);
@@ -124,6 +125,67 @@ const Voice = ({ onClose, isPage = false }) => {
     }
   }, [resetTranscript]);
 
+  // ── Razorpay Checkout Handler ─────────────────────────────────────────────
+  const triggerRazorpayCheckout = useCallback((checkoutAction) => {
+    if (!checkoutAction || checkoutAction.action !== "TRIGGER_RAZORPAY_CHECKOUT") return;
+    const { key_id, order_id, amount, currency } = checkoutAction.data || {};
+
+    if (!window.Razorpay) {
+      alert("Razorpay checkout script is loading. Please try again.");
+      return;
+    }
+
+    const options = {
+      key: key_id,
+      amount: amount,
+      currency: currency || "INR",
+      name: "ShopMate",
+      description: "Order Checkout (Single Portal)",
+      order_id: order_id,
+      handler: async function (response) {
+        try {
+          const verifyRes = await fetch(`${import.meta.env.VITE_CHATBOT_URL}/payment/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_order_id: response.razorpay_order_id || order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature
+            })
+          });
+          const verifyData = await verifyRes.json();
+          if (verifyRes.ok && verifyData.status === "PAID") {
+            const session_id = getSessionId();
+            await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart/clear`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Session-ID": session_id }
+            }).catch(() => {});
+            setCartProducts([]);
+            await playTTS("Payment successful! Your order has been placed.");
+          } else {
+            await playTTS("Payment verification failed. Please contact support.");
+          }
+        } catch (err) {
+          console.error("Verification error:", err);
+        }
+      },
+      prefill: {
+        name: "ShopMate Customer",
+        email: "customer@shopmate.ai",
+        contact: "9999999999"
+      },
+      theme: {
+        color: "#2563eb"
+      }
+    };
+
+    const rzp = new window.Razorpay(options);
+    rzp.on('payment.failed', function (resp) {
+      playTTS("Payment failed. Please try again.");
+    });
+    rzp.open();
+  }, [getSessionId, playTTS]);
+
   // ── Main send ────────────────────────────────────────────────────────────
   const sendTranscript = useCallback((overrideText = null) => {
     const finalTranscript = (overrideText || transcript).trim();
@@ -161,9 +223,20 @@ const Voice = ({ onClose, isPage = false }) => {
           cart_products: cProducts = [],
           show_cart: showCart = false,
           should_speak: shouldSpeak = true,
+          checkout_action: checkoutAction = null,
+          spending_limit: updatedLimit = null,
         } = data;
 
+        if (updatedLimit !== null && updatedLimit !== undefined) {
+          setSpendingLimit(updatedLimit);
+        }
+
         if (imageToSend) removeImage();
+
+        // ── Trigger Razorpay modal if checkout action present ─────────────
+        if (checkoutAction) {
+          triggerRazorpayCheckout(checkoutAction);
+        }
 
         // ── Wishlist dialog ──────────────────────────────────────────────
         if (needsWishlist && wProducts.length > 0) {
@@ -177,9 +250,13 @@ const Voice = ({ onClose, isPage = false }) => {
 
         // ── Cart dialog ─────────────────────────────────────────────────────
         if (needsCart && cProducts.length > 0) {
-          setCartSearchResults(cProducts);
-          setCartProducts([]);
-          setSelectedCartProduct(null);
+          if (cProducts.length === 1) {
+            setSelectedCartProduct(cProducts[0]);
+            setCartSearchResults([]);
+          } else {
+            setCartSearchResults(cProducts);
+            setSelectedCartProduct(null);
+          }
           setCartQuantity(1);
           setShowCartDialog(true);
           setIsPlayingAudio(false);
@@ -209,7 +286,7 @@ const Voice = ({ onClose, isPage = false }) => {
         setIsMuted(false);
         isTranscribingRef.current = false;
       });
-  }, [transcript, uploadedImage, getSessionId, playTTS]);
+  }, [transcript, uploadedImage, getSessionId, playTTS, triggerRazorpayCheckout]);
 
     const handleWishlistConfirm = useCallback((product) => {
     const shopDetails = JSON.parse(localStorage.getItem("sc_details"));
@@ -267,13 +344,15 @@ const Voice = ({ onClose, isPage = false }) => {
       if (!res.ok) return;
       const data = await res.json();
       setCartProducts(data.cart_items || []);
-      setCartSearchResults([]);
-      setSelectedCartProduct(null);
-      setCartQuantity(1);
     } catch (err) {
       console.error("Cart fetch error:", err);
     }
   }, [getSessionId]);
+
+  // ── Sync cart on mount ───────────────────────────────────────────────────
+  useEffect(() => {
+    fetchCartItems();
+  }, [fetchCartItems]);
 
   const handleCartSelect = useCallback((product) => {
     setSelectedCartProduct(product);
@@ -284,29 +363,34 @@ const Voice = ({ onClose, isPage = false }) => {
     if (!selectedCartProduct) return;
     const session_id = getSessionId();
     try {
-      await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart/add`, {
+      const addRes = await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart/add`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Session-ID": session_id
         },
         body: JSON.stringify({
-          product_id: selectedCartProduct.product_id,
+          product_id:   selectedCartProduct.product_id,
           product_name: selectedCartProduct.product_name,
-          price: selectedCartProduct.price,
-          brand: selectedCartProduct.brand,
-          description: selectedCartProduct.description,
-          category: selectedCartProduct.category,
-          quantity: cartQuantity || 1
+          price:        selectedCartProduct.price,
+          brand:        selectedCartProduct.brand,
+          description:  selectedCartProduct.description,
+          category:     selectedCartProduct.category,
+          quantity:     cartQuantity || 1,
+          shop_id:      selectedCartProduct.shop_id,
+          shop_name:    selectedCartProduct.shop_name,
+          shop_city:    selectedCartProduct.shop_city,
+          shop_type:    selectedCartProduct.shop_type
         })
       });
-      const res = await fetch(`${import.meta.env.VITE_CHATBOT_URL}/cart`, {
-        method: "GET",
-        headers: { "X-Session-ID": session_id }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCartProducts(data.cart_items || []);
+      if (addRes.ok) {
+        const addData = await addRes.json();
+        if (addData.cart_items) {
+          setCartProducts(addData.cart_items);
+        }
+        if (addData.should_speak && addData.recommendation_text) {
+          await playTTS(addData.recommendation_text);
+        }
       }
     } catch (err) {
       console.error("Add to cart error:", err);
@@ -316,7 +400,7 @@ const Voice = ({ onClose, isPage = false }) => {
     setCartSearchResults([]);
     setSelectedCartProduct(null);
     setCartQuantity(1);
-  }, [cartQuantity, getSessionId, selectedCartProduct]);
+  }, [cartQuantity, getSessionId, playTTS, selectedCartProduct]);
 
   const handleCartRemove = useCallback(async (productId) => {
     const session_id = getSessionId();
@@ -465,6 +549,8 @@ const Voice = ({ onClose, isPage = false }) => {
             className="voice-cart-fab"
             onClick={async () => {
               await fetchCartItems();
+              setSelectedCartProduct(null);
+              setCartSearchResults([]);
               setShowCartDialog(true);
             }}
             title="Open cart"
@@ -475,7 +561,14 @@ const Voice = ({ onClose, isPage = false }) => {
 
         {/* ── Fixed header ── */}
         <div className="voice-header">
-          <p className="voice-header-title">{isPage ? "ShopMate Text Chat" : "ShopMate Voice"}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <p className="voice-header-title">{isPage ? "ShopMate Text Chat" : "ShopMate Voice"}</p>
+            {spendingLimit !== null && (
+              <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 600, background: 'rgba(16,185,129,0.15)', padding: '2px 8px', borderRadius: '12px' }}>
+                Limit: ₹{Number(spendingLimit).toLocaleString()}
+              </span>
+            )}
+          </div>
           <button className="voice-modal-close" onClick={handleClose}>×</button>
         </div>
 
@@ -633,9 +726,9 @@ const Voice = ({ onClose, isPage = false }) => {
               <div className="wl-dialog-header">
                 <span className="wl-dialog-icon">🛒</span>
                 <div>
-                  <p className="wl-dialog-title">{selectedCartProduct ? "Set quantity" : "Your cart"}</p>
+                  <p className="wl-dialog-title">{selectedCartProduct ? "Set quantity" : (cartSearchResults.length > 0 ? "Select product to add" : "Your cart")}</p>
                   <p className="wl-dialog-sub">
-                    {selectedCartProduct ? "Choose the quantity to add" : "Products selected for checkout"}
+                    {selectedCartProduct ? "Choose the quantity to add" : (cartSearchResults.length > 0 ? "Tap the product you want to add" : "Products selected for checkout")}
                   </p>
                 </div>
                 <button className="wl-dialog-close" onClick={handleCartDismiss}>✕</button>
@@ -669,9 +762,14 @@ const Voice = ({ onClose, isPage = false }) => {
                       Item total: ₹{Number(selectedCartProduct.price || 0) * Number(cartQuantity || 1)}
                     </div>
 
-                    <button className="wl-cancel-btn" onClick={handleCartConfirm}>
-                      Confirm add to cart
-                    </button>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                      <button className="wl-cancel-btn" style={{ flex: 1, background: '#2563eb', color: '#fff' }} onClick={handleCartConfirm}>
+                        Confirm add to cart
+                      </button>
+                      <button className="wl-cancel-btn" style={{ width: 'auto' }} onClick={handleCartDismiss}>
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   (cartSearchResults.length > 0 ? cartSearchResults : cartProducts).length === 0 ? (
@@ -721,9 +819,21 @@ const Voice = ({ onClose, isPage = false }) => {
               {!selectedCartProduct && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
                   {cartProducts.length > 0 && (
-                    <div style={{ fontWeight: 700, color: '#1f2937', textAlign: 'right' }}>
-                      Grand Total: ₹{cartTotal}
-                    </div>
+                    <>
+                      <div style={{ fontWeight: 700, color: '#1f2937', textAlign: 'right' }}>
+                        Grand Total: ₹{cartTotal}
+                      </div>
+                      <button
+                        className="wl-cancel-btn"
+                        style={{ background: '#10b981', color: '#fff', fontWeight: 600, padding: '10px' }}
+                        onClick={() => {
+                          handleCartDismiss();
+                          sendTranscript("Let's checkout");
+                        }}
+                      >
+                        💳 Proceed to Checkout (₹{cartTotal})
+                      </button>
+                    </>
                   )}
                   <button className="wl-cancel-btn" onClick={handleCartDismiss}>
                     Close
