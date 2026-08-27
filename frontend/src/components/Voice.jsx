@@ -35,6 +35,7 @@ const Voice = ({ onClose, isPage = false }) => {
   const [selectedCartProduct, setSelectedCartProduct] = useState(null);
   const [cartQuantity, setCartQuantity]             = useState(1);
   const [spendingLimit, setSpendingLimit]           = useState(null);
+  const [limitInput, setLimitInput]                 = useState("");
 
   const lastTranscriptRef      = useRef("");
   const pauseTimeoutRef        = useRef(null);
@@ -428,6 +429,25 @@ const Voice = ({ onClose, isPage = false }) => {
     setCartQuantity(1);
   }, []);
 
+  const handleLimitUpdate = useCallback(async () => {
+    const val = parseFloat(String(limitInput).replace(/,/g, ""));
+    if (!val || val <= 0) return;
+    const session_id = getSessionId();
+    try {
+      const res = await fetch(`${import.meta.env.VITE_CHATBOT_URL}/set-spending-limit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Session-ID": session_id },
+        body: JSON.stringify({ spending_limit: val })
+      });
+      if (res.ok) {
+        setSpendingLimit(val);
+        setLimitInput("");
+      }
+    } catch (err) {
+      console.error("Limit update error:", err);
+    }
+  }, [limitInput, getSessionId]);
+
   // ── Send image when bot is waiting ───────────────────────────────────────
   const sendImageNow = useCallback(() => {
     if (!uploadedImage) return;
@@ -818,6 +838,30 @@ const Voice = ({ onClose, isPage = false }) => {
 
               {!selectedCartProduct && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+                  {/* ── Spending limit editor ── */}
+                  <div style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: '10px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#065f46' }}>
+                      💰 Spending Limit{spendingLimit != null ? `: ₹${Number(spendingLimit).toLocaleString()}` : ': Not set'}
+                    </span>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="New limit (₹)"
+                        value={limitInput}
+                        onChange={e => setLimitInput(e.target.value)}
+                        style={{ flex: 1, padding: '6px 10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                      />
+                      <button
+                        onClick={handleLimitUpdate}
+                        disabled={!limitInput || Number(limitInput) <= 0}
+                        style={{ padding: '6px 14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', opacity: (!limitInput || Number(limitInput) <= 0) ? 0.5 : 1 }}
+                      >
+                        Update
+                      </button>
+                    </div>
+                  </div>
+
                   {cartProducts.length > 0 && (
                     <>
                       <div style={{ fontWeight: 700, color: '#1f2937', textAlign: 'right' }}>

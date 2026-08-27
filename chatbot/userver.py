@@ -1232,12 +1232,31 @@ CHANGE_LIMIT_PATTERNS = [
     r'(?:new|updated)\s+(?:spending\s+)?(?:limit|budget)',
     r'(?:budget|limit)\s+(?:is\s+now|to|is)\s*(?:₹|rs\.?\s*|inr\s*)?(\d[\d,\.]*)',
     r'(?:can\s+i\s+)?(?:change|update|increase|decrease|raise|lower|modify)\s+(?:the\s+|my\s+)?(?:limit|budget)',
+    # "make it 10000" / "make my limit 5000"
+    r'make\s+(?:it|my\s+(?:limit|budget))\s*(?:₹|rs\.?\s*|inr\s*)?(\d[\d,\.]*)',
+    # "I want to increase to 8000" / "increase to 8000"
+    r'(?:increase|decrease|raise|lower)\s+(?:it\s+)?to\s*(?:₹|rs\.?\s*|inr\s*)?(\d[\d,\.]*)',
+    # "my new budget is 5000" / "new limit is 8000"
+    r'(?:my\s+)?(?:new|updated)\s+(?:limit|budget|spending)\s*(?:is|=|:)?\s*(?:₹|rs\.?\s*|inr\s*)?(\d[\d,\.]*)',
+    # "5000 is my limit now" / "5000 is my new budget"
+    r'(?:₹|rs\.?\s*|inr\s*)?(\d[\d,\.]*)\s+is\s+my\s+(?:new\s+)?(?:limit|budget)',
+    # "limit to 8000" / "budget to 5000"
+    r'(?:limit|budget)\s+to\s*(?:₹|rs\.?\s*|inr\s*)?(\d[\d,\.]*)',
+    # "want to change limit" / "want to update budget"
+    r'(?:want\s+to|like\s+to|need\s+to)\s+(?:change|update|increase|decrease|modify|raise|lower|adjust)\s+(?:my\s+)?(?:spending\s+)?(?:limit|budget)',
 ]
 
 def extract_spending_limit(text: str) -> Optional[float]:
     """Extract numeric spending limit from user message. Returns float or None."""
     cleaned = text.lower().strip()
-    for pat in _SPENDING_LIMIT_PATTERNS:
+    limit_keywords = {"limit", "budget", "spend", "spending", "maximum", "max", "amount", "₹", "rs", "inr", "rupee"}
+    has_limit_keyword = any(kw in cleaned for kw in limit_keywords)
+
+    for i, pat in enumerate(_SPENDING_LIMIT_PATTERNS):
+        # Last pattern is a greedy standalone-number fallback — only allow it
+        # when the message clearly talks about a limit/budget to avoid false matches.
+        if i == len(_SPENDING_LIMIT_PATTERNS) - 1 and not has_limit_keyword:
+            continue
         m = re.search(pat, cleaned, re.IGNORECASE)
         if m:
             raw = m.group(1).replace(",", "").strip()
