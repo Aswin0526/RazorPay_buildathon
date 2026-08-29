@@ -864,6 +864,237 @@ def is_empty_sql_result(result: str) -> bool:
     return False
 
 
+def _bytea_to_data_url(val) -> Optional[str]:
+    """
+    Convert a PostgreSQL bytea value (bytes, memoryview, or hex string) to a JPEG data-URL.
+    Handles:
+      - Python bytes / memoryview  → direct
+      - Hex string  \x89504e47... → decode hex
+      - Raw base64 string          → wrap in data-URL
+      - Existing data: URL         → pass through
+    """
+    try:
+        if val is None:
+            return None
+
+        # ── bytes / memoryview (psycopg2 binary) ─────────────────────────
+        if isinstance(val, (bytes, memoryview)):
+            b = bytes(val)
+            if len(b) < 50:
+                return None
+            return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+
+        if not isinstance(val, str) or len(val) < 50:
+            return None
+
+        # ── PostgreSQL escaped hex: \x89504e47... ─────────────────────────
+        if val.startswith(r"\x") or val.startswith("\\x"):
+            hex_str = val[2:]
+            b = bytes.fromhex(hex_str)
+            if len(b) < 50:
+                return None
+            return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+
+        # ── Plain hex string without prefix (0a1b2c...) ───────────────────
+        if re.match(r'^[0-9a-fA-F]+$', val) and len(val) % 2 == 0:
+            try:
+                b = bytes.fromhex(val)
+                if len(b) >= 50:
+                    return f"data:image/jpeg;base64,{base64.b64encode(b).decode()}"
+            except ValueError:
+                pass
+
+        # ── Already a data-URL ────────────────────────────────────────────
+        if val.startswith("data:"):
+            return val
+
+        # ── Raw base64 ────────────────────────────────────────────────────
+        return f"data:image/jpeg;base64,{val}"
+
+    except Exception as e:
+        logger.debug(f"_bytea_to_data_url conversion failed: {e}")
+        return None
+
+
+def fetch_product_image(table_name: str, product_id, max_images: int = 2) -> List[str]:
+    """
+    Fetch up to `max_images` images from a shop product table by product id.
+    Returns a list of data-URL strings (may be empty).
+    """
+    import sqlalchemy
+    if not table_name or not product_id:
+        return []
+    try:
+        safe_table = safe_sql_identifier(table_name)
+        with engine.connect() as conn:
+            col_rows = conn.execute(sqlalchemy.text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = :t AND table_schema = 'public' ORDER BY ordinal_position"
+            ), {"t": safe_table}).fetchall()
+            columns = [r[0] for r in col_rows]
+
+        if not columns:
+            logger.warning(f"fetch_product_image: table '{safe_table}' not found or empty")
+            return []
+
+        image_cols = [c for c in columns if re.match(r"^image\d*$", c.lower())]
+        if not image_cols:
+            return []
+
+        id_col = next((c for c in columns if c.lower() in ("id", "product_id")), None)
+        if not id_col:
+            return []
+
+        select_str = ", ".join(f'"{c}"' for c in image_cols[:max_images])
+        with engine.connect() as conn:
+            row = conn.execute(
+                sqlalchemy.text(
+                    f'SELECT {select_str} FROM "{safe_table}" WHERE "{id_col}" = :pid LIMIT 1'
+                ),
+                {"pid": product_id}
+            ).fetchone()
+
+        if not row:
+            return []
+
+        results = []
+        for val in row:
+            url = _bytea_to_data_url(val)
+            if url:
+                results.append(url)
+            if len(results) >= max_images:
+                break
+        return results
+    except Exception as e:
+        logger.warning(f"fetch_product_image error table={table_name} id={product_id}: {e}")
+        return []
+
+
+def _resolve_shop_table_from_row(row: dict) -> Optional[str]:
+    """
+    For global_products_view rows, reconstruct the actual shop table name
+    using shop_type, shop_id, shop_name columns so we can fetch images.
+    Returns the table name string or None.
+    """
+    shop_type = next((row[k] for k in row if k in ("shop_type", "type") and row[k] not in ("", "None", None)), None)
+    shop_id   = next((row[k] for k in row if k in ("shop_id",) and row[k] not in ("", "None", None)), None)
+    shop_name = next((row[k] for k in row if k in ("shop_name",) and row[k] not in ("", "None", None)), None)
+
+    if not all([shop_type, shop_id, shop_name]):
+        return None
+
+    # Normalize exactly as table names are created: type_shopid_shopname
+    name_part = str(shop_name).lower().strip().replace(" ", "_")
+    name_part = re.sub(r"[^a-z0-9_]", "", name_part)
+    type_part = str(shop_type).lower().strip().replace(" ", "_")
+    type_part = re.sub(r"[^a-z0-9_]", "", type_part)
+    return f"{type_part}_{shop_id}_{name_part}"
+
+
+def parse_sql_results_to_cards(sql_results: str, table_name: str) -> List[Dict]:
+    """
+    Parse the pipe-delimited SQL result string into structured product card dicts,
+    and attach images fetched directly from the DB.
+    Returns up to 6 cards.
+    """
+    if not sql_results or sql_results.startswith("[NO_RESULTS") or sql_results.startswith("BLOCKED"):
+        return []
+    try:
+        lines = [l.strip() for l in sql_results.strip().split("\n") if l.strip()]
+        if len(lines) < 3:
+            return []
+
+        # Parse header
+        header_line = lines[0]
+        headers = [h.strip().lower() for h in header_line.split("|") if h.strip()]
+        data_lines = [l for l in lines[2:] if not all(c in "-+| " for c in l)]
+
+        is_global = table_name.endswith("_view")
+        all_tables = [t.lower() for t in get_all_db_tables()]
+
+        cards = []
+        for dl in data_lines[:6]:
+            parts = dl.split("|")
+            parts = [p.strip() for p in parts]
+            if parts and parts[0] == "":
+                parts = parts[1:]
+            if parts and parts[-1] == "":
+                parts = parts[:-1]
+
+            if len(parts) < len(headers):
+                continue
+
+            row = dict(zip(headers, parts))
+
+            # Key field extraction
+            id_val    = row.get("id") or row.get("product_id")
+            name_val  = next((row[k] for k in row if "name" in k and k != "shop_name" and row[k] not in ("", "None", None)), None)
+            price_val = next((row[k] for k in row if "price" in k and row[k] not in ("", "None", None)), None)
+            brand_val = next((row[k] for k in row if "brand" in k and row[k] not in ("", "None", None)), None)
+            desc_val  = next((row[k] for k in row if "desc" in k and row[k] not in ("", "None", None)), None)
+            cat_val   = next((row[k] for k in row if "cat" in k and row[k] not in ("", "None", None)), None)
+            qty_val   = next((row[k] for k in row if k in ("quantity", "qty", "stock") and row[k] not in ("", "None", None)), None)
+            shop_name_val = next((row[k] for k in row if k == "shop_name" and row[k] not in ("", "None", None)), None)
+            shop_city_val = next((row[k] for k in row if "shop_city" in k and row[k] not in ("", "None", None)), None)
+            feature_keys = {
+                "id", "product_id", "product_name", "title", "price", "brand",
+                "description", "category", "quantity", "qty", "stock", "created_at",
+                "shop_id", "shop_type", "shop_name", "shop_city", "shop_state",
+                "shop_country", "shop_email", "shop_phone", "shop_website",
+            }
+            features = [
+                f"{key.replace('_', ' ').title()}: {value}"
+                for key, value in row.items()
+                if key not in feature_keys
+                and not key.startswith("image")
+                and value not in ("", "None", None)
+            ][:6]
+
+            if not name_val:
+                continue
+
+            # ── Image fetch ──────────────────────────────────────────────
+            images = []
+            if id_val:
+                if is_global:
+                    # For global view: reconstruct the actual shop table
+                    shop_table = _resolve_shop_table_from_row(row)
+                    if shop_table and shop_table.lower() in all_tables:
+                        images = fetch_product_image(shop_table, id_val, max_images=2)
+                    else:
+                        logger.debug(f"Could not resolve shop table for global row: {row}")
+                else:
+                    # Direct shop table
+                    images = fetch_product_image(table_name, id_val, max_images=2)
+
+            try:
+                price_num = float(str(price_val).replace(",", "")) if price_val else None
+            except (ValueError, TypeError):
+                price_num = None
+
+            cards.append({
+                "product_id":   id_val,
+                "product_name": name_val,
+                "price":        price_num,
+                "brand":        brand_val,
+                "description":  str(desc_val)[:120] if desc_val else None,
+                "category":     cat_val,
+                "quantity":     qty_val,
+                "shop_name":    shop_name_val,
+                "shop_city":    shop_city_val,
+                "shop_state":   row.get("shop_state"),
+                "shop_country": row.get("shop_country"),
+                "shop_type":    row.get("shop_type"),
+                "features":     features,
+                "images":       images,                     # list of up to 2 data-URLs
+                "image":        images[0] if images else None,  # convenience first image
+            })
+        return cards
+    except Exception as e:
+        logger.warning(f"parse_sql_results_to_cards error: {e}")
+        return []
+
+
 def search_products_for_wishlist(keyword: str, allowed_table: str, filters: Optional[dict] = None) -> list:
     """
     Search shop table or global view for products matching keyword.
@@ -1246,16 +1477,21 @@ CHANGE_LIMIT_PATTERNS = [
     r'(?:want\s+to|like\s+to|need\s+to)\s+(?:change|update|increase|decrease|modify|raise|lower|adjust)\s+(?:my\s+)?(?:spending\s+)?(?:limit|budget)',
 ]
 
-def extract_spending_limit(text: str) -> Optional[float]:
-    """Extract numeric spending limit from user message. Returns float or None."""
+def extract_spending_limit(text: str, allow_bare_number: bool = False) -> Optional[float]:
+    """Extract numeric spending limit from user message. Returns float or None.
+    
+    allow_bare_number: when True (initial setup), accept a plain number like "1000"
+                       even without limit/budget keywords.
+    """
     cleaned = text.lower().strip()
     limit_keywords = {"limit", "budget", "spend", "spending", "maximum", "max", "amount", "₹", "rs", "inr", "rupee"}
     has_limit_keyword = any(kw in cleaned for kw in limit_keywords)
 
     for i, pat in enumerate(_SPENDING_LIMIT_PATTERNS):
-        # Last pattern is a greedy standalone-number fallback — only allow it
-        # when the message clearly talks about a limit/budget to avoid false matches.
-        if i == len(_SPENDING_LIMIT_PATTERNS) - 1 and not has_limit_keyword:
+        # Last pattern is a greedy standalone-number fallback.
+        # Allow it unconditionally during initial setup; mid-session only if
+        # the message clearly talks about a limit/budget.
+        if i == len(_SPENDING_LIMIT_PATTERNS) - 1 and not has_limit_keyword and not allow_bare_number:
             continue
         m = re.search(pat, cleaned, re.IGNORECASE)
         if m:
@@ -1382,6 +1618,7 @@ class RetailAgentState(TypedDict):
     cart_recommendations: List[Dict]
     rec_context: str
     final_text: str
+    product_cards: List[Dict]
     # Spending limit & checkout
     spending_limit_set: bool          # True after user provided a limit this turn
     checkout_action: Optional[Dict]   # Populated when Razorpay order is created
@@ -1646,6 +1883,11 @@ class LangGraphRetailAgent:
                     cart_recommendations = rec_result.get("recommendations", [])
                     rec_context = rec_result.get("recommendation_text", "")
 
+            # Parse sql_results into product cards (with images) if we have data
+            product_cards: List[Dict] = []
+            if sql_results and not sql_was_empty:
+                product_cards = parse_sql_results_to_cards(sql_results, self.table_name)
+
             state["sql_results"] = sql_results
             state["wishlist_products"] = wishlist_products
             state["cart_products"] = cart_products
@@ -1653,6 +1895,7 @@ class LangGraphRetailAgent:
             state["rec_context"] = rec_context
             state["sql_was_empty"] = sql_was_empty
             state["location_fallback"] = location_fallback
+            state["product_cards"] = product_cards
             return state
 
         def response_node(state: RetailAgentState):
@@ -1704,8 +1947,10 @@ class LangGraphRetailAgent:
         spending_limit_just_set = False
 
         if spending_limit is None:
-            # Try to extract a limit from this message first
-            extracted = extract_spending_limit(user_message)
+            # Try to extract a limit from this message first.
+            # allow_bare_number=True: the bot already asked for a number,
+            # so a plain "1000" reply must be accepted.
+            extracted = extract_spending_limit(user_message, allow_bare_number=True)
             if extracted is not None:
                 self.session["spending_limit"] = extracted
                 spending_limit = extracted
@@ -1946,6 +2191,7 @@ class LangGraphRetailAgent:
             "cart_recommendations": [],
             "rec_context": "",
             "final_text": "",
+            "product_cards": [],
             "spending_limit_set": False,
             "checkout_action": None,
             "sql_was_empty": False,
@@ -1959,6 +2205,7 @@ class LangGraphRetailAgent:
         cart_products = result.get("cart_products", [])
         cart_recommendations = result.get("cart_recommendations", [])
         rec_text = result.get("rec_context", "")
+        product_cards = result.get("product_cards", [])
 
         self.session["chat_history"].append({
             "role": "user",
@@ -1988,6 +2235,7 @@ class LangGraphRetailAgent:
             "should_speak": True,
             "spending_limit_set": False,
             "checkout_action": None,
+            "product_cards": product_cards,
         }
 
     def _parse_plan(self, content: str) -> dict:
@@ -2332,13 +2580,18 @@ def fetch_analyses_from_db(shop_id: Optional[str] = None, limit: int = 100) -> l
     """Fetch analyses from DB, optionally filtered by shop_id."""
     import sqlalchemy
     try:
+        base_cols = """
+            id, session_id, user_id, shop_id, shop_name, city, state,
+            started_at, ended_at, duration_minutes, turn_count,
+            outcome, final_stage, summary, customer_intent,
+            sentiment_arc, products_discussed, key_insights,
+            missed_opportunities, recommended_followup,
+            images_shared, sql_queries_made, stages_reached,
+            full_analysis, conversation_transcript, created_at
+        """
         if shop_id:
-            sql = sqlalchemy.text("""
-                SELECT id, session_id, user_id, shop_id, shop_name, city, state,
-                       started_at, ended_at, duration_minutes, turn_count,
-                       outcome, final_stage, summary, customer_intent,
-                       sentiment_arc, products_discussed, key_insights,
-                       recommended_followup, created_at
+            sql = sqlalchemy.text(f"""
+                SELECT {base_cols}
                 FROM conversation_analyses
                 WHERE shop_id = :shop_id
                 ORDER BY created_at DESC
@@ -2346,12 +2599,8 @@ def fetch_analyses_from_db(shop_id: Optional[str] = None, limit: int = 100) -> l
             """)
             params = {"shop_id": str(shop_id), "limit": limit}
         else:
-            sql = sqlalchemy.text("""
-                SELECT id, session_id, user_id, shop_id, shop_name, city, state,
-                       started_at, ended_at, duration_minutes, turn_count,
-                       outcome, final_stage, summary, customer_intent,
-                       sentiment_arc, products_discussed, key_insights,
-                       recommended_followup, created_at
+            sql = sqlalchemy.text(f"""
+                SELECT {base_cols}
                 FROM conversation_analyses
                 ORDER BY created_at DESC
                 LIMIT :limit
@@ -2360,7 +2609,26 @@ def fetch_analyses_from_db(shop_id: Optional[str] = None, limit: int = 100) -> l
 
         with engine.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            return [dict(r._mapping) for r in rows]
+            results = []
+            for r in rows:
+                row = dict(r._mapping)
+                # Parse JSON string fields back to Python objects
+                for field in ("products_discussed", "key_insights", "missed_opportunities",
+                              "stages_reached", "full_analysis", "conversation_transcript"):
+                    val = row.get(field)
+                    if isinstance(val, str):
+                        try:
+                            row[field] = json.loads(val)
+                        except Exception:
+                            pass
+                # Extract payment_status from full_analysis if present
+                fa = row.get("full_analysis") or {}
+                row["payment_status"] = fa.get("payment_status", {
+                    "initiated": False, "completed": False, "amount": 0
+                })
+                row["conversation_breakdown"] = fa.get("conversation_breakdown", [])
+                results.append(row)
+            return results
     except Exception as e:
         logger.error(f"fetch_analyses_from_db error: {e}")
         return []
@@ -2680,16 +2948,18 @@ def start_chat():
     is_global_chat = bool(form_data.get("globalChat") or form_data.get("global_chat") or form_data.get("mode") == "global")
 
     session_data.update({
-        "shopName":      form_data.get("shopName") or ("ShopMate" if is_global_chat else None),
-        "city":          form_data.get("city"),
-        "state":         form_data.get("state"),
-        "country":       form_data.get("country"),
-        "productType":   form_data.get("productType") or ("all products" if is_global_chat else "products"),
-        "shop_id":       form_data.get("shopId"),
-        "global_chat":   is_global_chat,
-        "chat_history":  [],
-        "current_stage": "GREETING",
-        "spending_limit": None
+        "shopName":       form_data.get("shopName") or ("ShopMate" if is_global_chat else None),
+        "city":           form_data.get("city"),
+        "state":          form_data.get("state"),
+        "country":        form_data.get("country"),
+        "productType":    form_data.get("productType") or ("all products" if is_global_chat else "products"),
+        "shop_id":        form_data.get("shopId"),
+        "global_chat":    is_global_chat,
+        "chat_history":   [],
+        "current_stage":  "GREETING",
+        "spending_limit": None,
+        "customer_email": form_data.get("customerEmail") or None,
+        "user_id":        form_data.get("customerId") or None,
     })
 
     shop_name    = session_data.get("shopName") or ("ShopMate" if is_global_chat else "the store")
@@ -2784,10 +3054,12 @@ def transcribe():
         "should_speak":        result.get("should_speak", True),
         "stage":               session_data.get("current_stage", "BROWSING"),
         "session_id":          session_id,
+        # ── Product cards (structured, with images) ────────────────────────
+        "product_cards":       result.get("product_cards", []),
         # ── Checkout / spending-limit fields ───────────────────────────────
         "spending_limit_set":  result.get("spending_limit_set", False),
         "spending_limit":      session_data.get("spending_limit"),
-        "checkout_action":     result.get("checkout_action"),  # TRIGGER_RAZORPAY_CHECKOUT payload or null
+        "checkout_action":     result.get("checkout_action"),
     }), 200
 
 
@@ -2896,14 +3168,21 @@ Session ID: {session_id}
 Duration: {duration_minutes} minutes
 Total Turns: {turn_count}
 
+Payment Info: {payment_summary}
+
 Conversation:
 {conversation_text}
 
 Provide a structured JSON analysis with EXACTLY this format (no markdown, raw JSON only):
 {{
   "summary": "2-3 sentence plain English summary of what happened in the conversation",
-  "outcome": "PURCHASED_INTENT | BROWSED_ONLY | ABANDONED | SUPPORT_RESOLVED | UNDECIDED",
+  "outcome": "PURCHASED_INTENT | PAYMENT_COMPLETED | PAYMENT_INITIATED | BROWSED_ONLY | ABANDONED | SUPPORT_RESOLVED | UNDECIDED",
   "final_stage": "the last stage reached in the sales funnel",
+  "payment_status": {{
+    "initiated": true or false,
+    "completed": true or false,
+    "amount": 0.0
+  }},
   "metrics": {{
     "turns": {turn_count},
     "duration_minutes": {duration_minutes},
@@ -2921,8 +3200,208 @@ Provide a structured JSON analysis with EXACTLY this format (no markdown, raw JS
   ],
   "missed_opportunities": ["things the bot could have done better"],
   "sentiment_arc": "started_positive | started_negative | improved | declined | neutral_throughout",
-  "recommended_followup": "what a human sales agent should do if this customer visits the store"
+  "recommended_followup": "what a human sales agent should do if this customer visits the store",
+  "conversation_breakdown": [
+    {{"turn": 1, "customer": "...", "intent": "...", "stage": "..."}}
+  ]
 }}"""
+
+
+# ─────────────────────────────────────────────
+# Purchase Email Helper
+# ─────────────────────────────────────────────
+SMTP_HOST     = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER     = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+EMAIL_FROM    = os.getenv("EMAIL_FROM_NAME", "ShopMate")
+
+
+def send_purchase_email(to_email: str, record: dict, analysis: dict) -> bool:
+    """Send a detailed purchase confirmation + session log email to the customer."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    # Read credentials fresh every call so .env changes don't need a restart
+    smtp_host     = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port     = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user     = os.getenv("SMTP_USER", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "").strip().replace(" ", "")
+    email_from    = os.getenv("EMAIL_FROM_NAME", "ShopMate")
+
+    if not smtp_user or not smtp_password:
+        logger.warning("Email not sent — SMTP_USER or SMTP_PASSWORD not configured in .env")
+        return False
+
+    try:
+        ps            = analysis.get("payment_status", {})
+        amount        = float(ps.get("amount") or 0)
+        shop_name     = record.get("shop_name") or "ShopMate"
+        city          = record.get("city") or ""
+        duration      = record.get("duration_minutes", 0)
+        turn_count    = record.get("turn_count", 0)
+        summary       = analysis.get("summary", "")
+        intent        = analysis.get("customer_intent", "")
+        products      = analysis.get("products_discussed") or []
+        insights      = analysis.get("key_insights") or []
+        followup      = analysis.get("recommended_followup", "")
+        sentiment     = analysis.get("sentiment_arc", "")
+        breakdown     = analysis.get("conversation_breakdown") or []
+        transcript    = record.get("conversation") or []
+
+        # Build product pills
+        product_pills = "".join(
+            f'<span style="display:inline-block;background:#ede9fe;color:#5b21b6;'
+            f'border-radius:20px;padding:3px 10px;font-size:12px;margin:2px 3px;">{p}</span>'
+            for p in (products[:10] if products else [])
+        )
+
+        # Build conversation log (from breakdown if available, else transcript)
+        log_items = breakdown if breakdown else transcript
+        turns_html = ""
+        for i, item in enumerate(log_items[:30]):
+            user_msg = item.get("customer") or item.get("content") or ""
+            bot_msg  = item.get("response") or ""
+            stage    = item.get("stage") or ""
+            if not user_msg and not bot_msg:
+                continue
+            turns_html += f"""
+            <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+              <div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;
+                          letter-spacing:0.4px;margin-bottom:8px;">
+                Turn {i+1}{f' · {stage}' if stage else ''}
+              </div>
+              {f'<div style="display:flex;gap:8px;margin-bottom:6px;">'
+               f'<span style="font-size:16px;">👤</span>'
+               f'<span style="font-size:13px;color:#1e40af;line-height:1.5;">{user_msg}</span>'
+               f'</div>' if user_msg else ''}
+              {f'<div style="display:flex;gap:8px;">'
+               f'<span style="font-size:16px;">🤖</span>'
+               f'<span style="font-size:13px;color:#374151;line-height:1.5;">{bot_msg}</span>'
+               f'</div>' if bot_msg else ''}
+            </div>"""
+
+        insights_html = "".join(
+            f'<li style="margin-bottom:6px;font-size:13px;color:#374151;">{ins}</li>'
+            for ins in insights
+        )
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Segoe UI',Arial,sans-serif;">
+<div style="max-width:640px;margin:32px auto;background:#fff;border-radius:16px;
+            overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#7c6ff7,#5b8af5);padding:28px 32px;text-align:center;">
+    <h1 style="color:#fff;margin:0;font-size:22px;font-weight:700;">🛍️ ShopMate</h1>
+    <p style="color:rgba(255,255,255,0.85);margin:6px 0 0;font-size:14px;">Your Shopping Session Summary</p>
+  </div>
+
+  <!-- Payment confirmation -->
+  <div style="background:#d1fae5;border-bottom:1px solid #6ee7b7;padding:18px 32px;
+              display:flex;align-items:center;gap:12px;">
+    <span style="font-size:24px;">✅</span>
+    <div>
+      <p style="margin:0;font-weight:700;color:#065f46;font-size:16px;">
+        Payment Confirmed — ₹{amount:,.2f}
+      </p>
+      <p style="margin:4px 0 0;font-size:12px;color:#047857;">
+        Thank you for shopping with {shop_name}{f' in {city}' if city else ''}!
+      </p>
+    </div>
+  </div>
+
+  <div style="padding:28px 32px;">
+
+    <!-- Session metrics -->
+    <div style="display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap;">
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:20px;
+                  padding:5px 14px;font-size:12px;color:#374151;">⏱️ {duration} min</div>
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:20px;
+                  padding:5px 14px;font-size:12px;color:#374151;">🔄 {turn_count} turns</div>
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:20px;
+                  padding:5px 14px;font-size:12px;color:#374151;">😊 {sentiment.replace("_", " ")}</div>
+    </div>
+
+    <!-- Summary -->
+    <div style="margin-bottom:20px;">
+      <h3 style="font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;
+                  letter-spacing:0.5px;margin:0 0 8px;">📝 Session Summary</h3>
+      <p style="font-size:14px;color:#4b5563;line-height:1.6;margin:0;
+                background:#f9fafb;border-radius:10px;padding:12px 14px;">{summary}</p>
+    </div>
+
+    <!-- Intent -->
+    {f'''<div style="margin-bottom:20px;">
+      <h3 style="font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;
+                  letter-spacing:0.5px;margin:0 0 8px;">🎯 What You Were Looking For</h3>
+      <p style="font-size:14px;color:#4b5563;line-height:1.6;margin:0;">{intent}</p>
+    </div>''' if intent else ''}
+
+    <!-- Products -->
+    {f'''<div style="margin-bottom:20px;">
+      <h3 style="font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;
+                  letter-spacing:0.5px;margin:0 0 8px;">📦 Products Explored</h3>
+      <div>{product_pills}</div>
+    </div>''' if product_pills else ''}
+
+    <!-- Insights -->
+    {f'''<div style="margin-bottom:20px;">
+      <h3 style="font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;
+                  letter-spacing:0.5px;margin:0 0 8px;">💡 Key Insights</h3>
+      <ul style="margin:0;padding-left:18px;">{insights_html}</ul>
+    </div>''' if insights_html else ''}
+
+    <!-- Follow-up -->
+    {f'''<div style="margin-bottom:24px;background:#f0fdf4;border-left:3px solid #22c55e;
+                    border-radius:0 10px 10px 0;padding:12px 14px;">
+      <h3 style="font-size:12px;font-weight:700;color:#065f46;text-transform:uppercase;
+                  letter-spacing:0.5px;margin:0 0 6px;">🤝 Next Steps</h3>
+      <p style="font-size:13px;color:#374151;margin:0;line-height:1.5;">{followup}</p>
+    </div>''' if followup else ''}
+
+    <!-- Conversation log -->
+    {f'''<div>
+      <h3 style="font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;
+                  letter-spacing:0.5px;margin:0 0 12px;">💬 Full Conversation Log</h3>
+      {turns_html}
+    </div>''' if turns_html else ''}
+
+  </div>
+
+  <!-- Footer -->
+  <div style="background:#f9fafb;border-top:1px solid #e5e7eb;padding:18px 32px;
+              text-align:center;">
+    <p style="margin:0;font-size:12px;color:#9ca3af;">
+      This summary was auto-generated by ShopMate AI. Happy shopping! 🎉
+    </p>
+  </div>
+
+</div>
+</body>
+</html>"""
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Your ShopMate Purchase — ₹{amount:,.0f} at {shop_name}"
+        msg["From"]    = f"{email_from} <{smtp_user}>"
+        msg["To"]      = to_email
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(smtp_user, smtp_password)
+            smtp.sendmail(smtp_user, to_email, msg.as_string())
+
+        logger.info(f"Purchase email sent to {to_email} for session {record.get('session_id','')[:8]}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send purchase email to {to_email}: {e}")
+        return False
 
 
 @app.route("/analyze-session", methods=["POST"])
@@ -2950,6 +3429,46 @@ def analyze_session():
         conversation_lines.append(f"  [Stage: {msg.get('stage', '?')}]")
         conversation_lines.append("")
     conversation_text = "\n".join(conversation_lines)
+
+    # ── Payment info from online_orders table ────────────────────────────
+    payment_summary = "No payment initiated."
+    payment_initiated = False
+    payment_completed = False
+    payment_amount = 0.0
+    try:
+        import sqlalchemy as _sa
+        # Try customer_id first, then fall back to session_id
+        customer_id = session_data.get("user_id")
+        with engine.connect() as _conn:
+            pay_rows = None
+            if customer_id:
+                pay_rows = _conn.execute(_sa.text(
+                    "SELECT razorpay_order_id, total_amount, payment_status, created_at "
+                    "FROM online_orders WHERE user_id = :uid ORDER BY created_at DESC LIMIT 5"
+                ), {"uid": str(customer_id)}).fetchall()
+            # Fallback: match by session_id stored as user_id
+            if not pay_rows:
+                pay_rows = _conn.execute(_sa.text(
+                    "SELECT razorpay_order_id, total_amount, payment_status, created_at "
+                    "FROM online_orders WHERE user_id = :uid ORDER BY created_at DESC LIMIT 5"
+                ), {"uid": session_id}).fetchall()
+            if pay_rows:
+                payment_initiated = True
+                paid = [r for r in pay_rows if str(r[2]).upper() == "PAID"]
+                payment_completed = len(paid) > 0
+                payment_amount = float(paid[0][1]) if paid else float(pay_rows[0][1])
+                if payment_completed:
+                    payment_summary = (
+                        f"Payment COMPLETED. Amount: ₹{payment_amount:,.2f}. "
+                        f"Order ID: {paid[0][0]}."
+                    )
+                else:
+                    payment_summary = (
+                        f"Payment INITIATED but not completed. "
+                        f"Amount: ₹{payment_amount:,.2f}. Status: {pay_rows[0][2]}."
+                    )
+    except Exception as _pe:
+        logger.warning(f"Payment lookup failed during analysis: {_pe}")
 
     # ── Calculate metrics ────────────────────────────────────────────────
     turn_count      = len(chat_history)
@@ -2979,6 +3498,7 @@ def analyze_session():
             turn_count       = turn_count,
             images_shared    = images_shared,
             sql_queries      = sql_queries,
+            payment_summary  = payment_summary,
             conversation_text= conversation_text
         )
 
@@ -2989,6 +3509,16 @@ def analyze_session():
 
         # Patch stages_reached from actual data (LLM sometimes hallucinates)
         llm_analysis["metrics"]["stages_reached"] = stages_reached
+        # Patch payment status from actual DB data (authoritative)
+        llm_analysis["payment_status"] = {
+            "initiated": payment_initiated,
+            "completed": payment_completed,
+            "amount":    payment_amount,
+        }
+        if payment_completed:
+            llm_analysis["outcome"] = "PAYMENT_COMPLETED"
+        elif payment_initiated:
+            llm_analysis["outcome"] = "PAYMENT_INITIATED"
 
     except Exception as e:
         logger.error(f"Analysis LLM error: {e}")
@@ -3027,11 +3557,62 @@ def analyze_session():
         "duration_minutes": duration_minutes,
         "turn_count":    turn_count,
         "analysis":      llm_analysis,
-        "conversation":  chat_history   # full transcript attached
+        "conversation":  chat_history
     }
 
     # ── Save to database ────────────────────────────────────────────────
+    # For global chat with a purchase: also save one record per shop that had
+    # items in the cart, so each shop owner can see this customer's session.
     db_id = save_analysis_to_db(record)
+    extra_db_ids = []
+
+    if session_data.get("global_chat") and payment_completed:
+        cart_items = get_cart_for_session(session_data)
+        # Group items by shop_id
+        shops_in_cart: Dict[str, dict] = {}
+        for item in cart_items:
+            sid = str(item.get("shop_id") or "")
+            if sid and sid not in shops_in_cart:
+                shops_in_cart[sid] = {
+                    "shop_id":   sid,
+                    "shop_name": item.get("shop_name") or "",
+                    "shop_city": item.get("shop_city") or "",
+                    "shop_type": item.get("shop_type") or "",
+                }
+
+        for shop_sid, shop_info in shops_in_cart.items():
+            # Filter products discussed to this shop's items only
+            shop_products = [
+                item.get("product_name") for item in cart_items
+                if str(item.get("shop_id") or "") == shop_sid and item.get("product_name")
+            ]
+            shop_analysis = dict(llm_analysis)
+            shop_analysis["products_discussed"] = shop_products or llm_analysis.get("products_discussed", [])
+
+            shop_record = dict(record)
+            shop_record["shop_id"]   = shop_sid
+            shop_record["shop_name"] = shop_info["shop_name"]
+            shop_record["city"]      = shop_info["shop_city"] or record.get("city")
+            shop_record["analysis"]  = shop_analysis
+            # Use a sub-session ID so it doesn't conflict with the global record
+            shop_record["session_id"] = f"{session_id}_shop_{shop_sid}"
+
+            extra_id = save_analysis_to_db(shop_record)
+            if extra_id:
+                extra_db_ids.append(extra_id)
+                logger.info(
+                    f"Per-shop analysis saved (db_id={extra_id}) for shop_id={shop_sid} "
+                    f"({shop_info['shop_name']})"
+                )
+
+    # ── Send purchase email if payment was completed ─────────────────────
+    email_sent = False
+    if payment_completed:
+        customer_email = session_data.get("customer_email")
+        if customer_email:
+            email_sent = send_purchase_email(customer_email, record, llm_analysis)
+        else:
+            logger.info("Payment completed but no customer_email in session — email skipped")
 
     # ── Clear session after saving ───────────────────────────────────────
     session_data["chat_history"]  = []
@@ -3039,14 +3620,17 @@ def analyze_session():
     logger.info(
         f"Analysis saved (db_id={db_id}) + session cleared | "
         f"session={session_id[:8]} | shop={record['shop_name']} | "
-        f"outcome={llm_analysis.get('outcome')} | turns={turn_count}"
+        f"outcome={llm_analysis.get('outcome')} | turns={turn_count} | "
+        f"email_sent={email_sent} | per_shop_ids={extra_db_ids}"
     )
 
     return jsonify({
-        "message":    "Analysis complete and session cleared",
-        "session_id": session_id,
-        "db_id":      db_id,
-        "analysis":   llm_analysis
+        "message":        "Analysis complete and session cleared",
+        "session_id":     session_id,
+        "db_id":          db_id,
+        "per_shop_db_ids": extra_db_ids,
+        "analysis":       llm_analysis,
+        "email_sent":     email_sent,
     }), 200
 
 
@@ -3127,6 +3711,39 @@ def get_analyses_stats():
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"status": "ShopMate Conversational AI is running"}), 200
+
+
+# ─────────────────────────────────────────────
+# Test email endpoint (dev only)
+# ─────────────────────────────────────────────
+@app.route("/test-email", methods=["POST"])
+def test_email():
+    """Send a test purchase email. Body: {"to": "email@example.com"}"""
+    data = request.get_json(silent=True) or {}
+    to   = data.get("to", "").strip()
+    if not to:
+        return jsonify({"error": "provide 'to' email in body"}), 400
+
+    dummy_record   = {"shop_name": "ShopMate Test", "city": "Chennai",
+                      "duration_minutes": 3.5, "turn_count": 8,
+                      "session_id": "test-session",
+                      "conversation": [
+                          {"content": "I want an iPhone", "response": "Here are some options!", "stage": "BROWSING"}
+                      ]}
+    dummy_analysis = {
+        "payment_status": {"initiated": True, "completed": True, "amount": 79999},
+        "summary": "Customer was looking for iPhones and completed a purchase.",
+        "customer_intent": "Buy an iPhone 15 Pro",
+        "products_discussed": ["iPhone 15 Pro", "iPhone 14"],
+        "key_insights": ["Customer preferred Pro model", "Price was not a concern"],
+        "recommended_followup": "Follow up with accessory recommendations.",
+        "sentiment_arc": "neutral_throughout",
+        "conversation_breakdown": [
+            {"turn": 1, "customer": "I want an iPhone", "response": "Here are some options!", "stage": "BROWSING"}
+        ]
+    }
+    ok = send_purchase_email(to, dummy_record, dummy_analysis)
+    return jsonify({"sent": ok, "to": to}), (200 if ok else 500)
 
 
 # ─────────────────────────────────────────────

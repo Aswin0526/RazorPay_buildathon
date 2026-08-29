@@ -27,6 +27,8 @@ const Overview = (data) => {
     const [loading, setLoading] = useState(true);
     const [feedbacks, setFeedbacks] = useState([]);
     const [avgRating, setAvgRating] = useState(0);
+    const [conversionRate, setConversionRate] = useState(0);
+    const [conversionMeta, setConversionMeta] = useState({ online_orders: 0, offline_orders: 0, paid_online_orders: 0 });
     const [graphData, setGraphData] = useState([]);
     const [showModal, setShowModal] = useState(false);
     const [selectedShop, setSelectedShop] = useState(null);
@@ -107,6 +109,44 @@ const Overview = (data) => {
     };
 
     fetchAvgRating();
+    }, [shopData]);
+
+    useEffect(() => {
+        if (!shopData) return;
+
+        const shopId = shopData.shop_id || shopData.id;
+        if (!shopId) return;
+
+        const fetchConversionRate = async () => {
+            try {
+                const token = localStorage.getItem('access_token');
+                const response = await fetch(
+                    `${import.meta.env.VITE_BACKEND_URL}/api/owners/online-order-conversion-rate`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({ shop_id: shopId }),
+                    }
+                );
+
+                const data = await response.json();
+                if (data.success && data.data) {
+                    setConversionRate(Number(data.data.conversion_rate || 0));
+                    setConversionMeta({
+                        online_orders: Number(data.data.online_orders || 0),
+                        offline_orders: Number(data.data.offline_orders || 0),
+                        paid_online_orders: Number(data.data.paid_online_orders || 0),
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching conversion rate:', error);
+            }
+        };
+
+        fetchConversionRate();
     }, [shopData]);
 
     useEffect(() => {
@@ -599,6 +639,36 @@ const handleCloseConvDrawer = () => {
                                         );
                                     })}
                                 </div>
+
+                                <div className="conversion-card" style={{
+                                    marginTop: '18px',
+                                    padding: '16px',
+                                    borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, #e8f5ff 0%, #eef2ff 100%)',
+                                    border: '1px solid rgba(102, 126, 234, 0.18)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '12px',
+                                    flexWrap: 'wrap'
+                                }}>
+                                    <div>
+                                        <div style={{ fontSize: '12px', color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
+                                            Online conversion rate
+                                        </div>
+                                        <div style={{ fontSize: '28px', fontWeight: 800, color: '#1f2937', marginTop: '4px' }}>
+                                            {conversionRate.toFixed(2)}%
+                                        </div>
+                                    </div>
+                                    <div style={{ textAlign: 'right', color: '#374151', fontSize: '13px' }}>
+                                        <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                                            {conversionMeta.paid_online_orders} paid online
+                                        </div>
+                                        <div>
+                                            {conversionMeta.online_orders} online • {conversionMeta.offline_orders} offline
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </section>
 
@@ -908,6 +978,193 @@ const handleCloseConvDrawer = () => {
                             </div>
                         </div>
                     )}
+
+                    {/* ── Conversation Analysis Detail Dialog ── */}
+                    {showConvDrawer && selectedConversation && (
+                        <div className="ca-overlay" onClick={handleCloseConvDrawer}>
+                            <div className="ca-dialog" onClick={e => e.stopPropagation()}>
+                                {/* Header */}
+                                <div className="ca-dialog-header">
+                                    <div className="ca-dialog-title-row">
+                                        <span className={`ov-badge ov-outcome-${selectedConversation.outcome?.toLowerCase() || 'unknown'}`}>
+                                            {selectedConversation.outcome || 'Unknown'}
+                                        </span>
+                                        <h3 className="ca-dialog-title">Conversation Analysis</h3>
+                                        <span className="ca-dialog-date">
+                                            {selectedConversation.created_at
+                                                ? new Date(selectedConversation.created_at).toLocaleString()
+                                                : 'N/A'}
+                                        </span>
+                                    </div>
+                                    <button className="ca-dialog-close" onClick={handleCloseConvDrawer}>✕</button>
+                                </div>
+
+                                <div className="ca-dialog-body">
+                                    {/* Metrics row */}
+                                    <div className="ca-metrics-row">
+                                        <div className="ca-metric-chip">⏱️ {selectedConversation.duration_minutes || 0} min</div>
+                                        <div className="ca-metric-chip">🔄 {selectedConversation.turn_count || 0} turns</div>
+                                        <div className="ca-metric-chip">📌 {selectedConversation.final_stage || 'N/A'}</div>
+                                        <div className="ca-metric-chip">😊 {selectedConversation.sentiment_arc || 'N/A'}</div>
+                                        {selectedConversation.images_shared > 0 && (
+                                            <div className="ca-metric-chip">🖼️ {selectedConversation.images_shared} images</div>
+                                        )}
+                                    </div>
+
+                                    {/* Payment status */}
+                                    {(() => {
+                                        const ps = selectedConversation.payment_status || {};
+                                        if (ps.initiated || ps.completed) return (
+                                            <div className={`ca-payment-banner ${ps.completed ? 'paid' : 'pending'}`}>
+                                                {ps.completed
+                                                    ? `✅ Payment completed — ₹${Number(ps.amount || 0).toLocaleString()}`
+                                                    : `⏳ Payment initiated — ₹${Number(ps.amount || 0).toLocaleString()} (not completed)`
+                                                }
+                                            </div>
+                                        );
+                                        return null;
+                                    })()}
+
+                                    {/* Summary */}
+                                    <div className="ca-section">
+                                        <h4 className="ca-section-title">📝 Summary</h4>
+                                        <p className="ca-section-text">{selectedConversation.summary || 'No summary available.'}</p>
+                                    </div>
+
+                                    {/* Customer intent */}
+                                    <div className="ca-section">
+                                        <h4 className="ca-section-title">🎯 Customer Intent</h4>
+                                        <p className="ca-section-text">{selectedConversation.customer_intent || '—'}</p>
+                                    </div>
+
+                                    {/* Products discussed */}
+                                    {(() => {
+                                        const prods = Array.isArray(selectedConversation.products_discussed)
+                                            ? selectedConversation.products_discussed
+                                            : [];
+                                        if (!prods.length) return null;
+                                        return (
+                                            <div className="ca-section">
+                                                <h4 className="ca-section-title">📦 Products Discussed</h4>
+                                                <div className="ca-tag-list">
+                                                    {prods.map((p, i) => <span key={i} className="ca-tag">{p}</span>)}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Key insights */}
+                                    {(() => {
+                                        const insights = Array.isArray(selectedConversation.key_insights)
+                                            ? selectedConversation.key_insights
+                                            : [];
+                                        if (!insights.length) return null;
+                                        return (
+                                            <div className="ca-section">
+                                                <h4 className="ca-section-title">💡 Key Insights</h4>
+                                                <ul className="ca-list">
+                                                    {insights.map((ins, i) => <li key={i}>{ins}</li>)}
+                                                </ul>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Missed opportunities */}
+                                    {(() => {
+                                        const missed = Array.isArray(selectedConversation.missed_opportunities)
+                                            ? selectedConversation.missed_opportunities
+                                            : [];
+                                        if (!missed.length) return null;
+                                        return (
+                                            <div className="ca-section">
+                                                <h4 className="ca-section-title">⚠️ Missed Opportunities</h4>
+                                                <ul className="ca-list ca-list-warn">
+                                                    {missed.map((m, i) => <li key={i}>{m}</li>)}
+                                                </ul>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Recommended follow-up */}
+                                    {selectedConversation.recommended_followup && (
+                                        <div className="ca-section">
+                                            <h4 className="ca-section-title">🤝 Recommended Follow-up</h4>
+                                            <p className="ca-section-text ca-followup">{selectedConversation.recommended_followup}</p>
+                                        </div>
+                                    )}
+
+                                    {/* Stage progression */}
+                                    {(() => {
+                                        const stages = Array.isArray(selectedConversation.stages_reached)
+                                            ? selectedConversation.stages_reached
+                                            : [];
+                                        if (!stages.length) return null;
+                                        return (
+                                            <div className="ca-section">
+                                                <h4 className="ca-section-title">🗺️ Stage Progression</h4>
+                                                <div className="ca-stages">
+                                                    {stages.map((s, i) => (
+                                                        <span key={i} className="ca-stage-step">
+                                                            {s}{i < stages.length - 1 ? ' →' : ''}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Conversation breakdown */}
+                                    {(() => {
+                                        const breakdown = Array.isArray(selectedConversation.conversation_breakdown)
+                                            ? selectedConversation.conversation_breakdown
+                                            : [];
+                                        const transcript = Array.isArray(selectedConversation.conversation_transcript)
+                                            ? selectedConversation.conversation_transcript
+                                            : [];
+                                        const items = breakdown.length ? breakdown : transcript;
+                                        if (!items.length) return null;
+                                        return (
+                                            <div className="ca-section">
+                                                <h4 className="ca-section-title">💬 Conversation Breakdown</h4>
+                                                <div className="ca-transcript">
+                                                    {items.map((item, i) => {
+                                                        // Support both breakdown format {turn, customer, intent, stage}
+                                                        // and raw transcript format {content, response, stage}
+                                                        const userMsg  = item.customer || item.content || '';
+                                                        const botMsg   = item.response || '';
+                                                        const stage    = item.stage || '';
+                                                        const intent   = item.intent || '';
+                                                        return (
+                                                            <div key={i} className="ca-turn">
+                                                                <div className="ca-turn-meta">
+                                                                    Turn {item.turn || i + 1}
+                                                                    {stage && <span className="ca-turn-stage">{stage}</span>}
+                                                                    {intent && <span className="ca-turn-intent">{intent}</span>}
+                                                                </div>
+                                                                {userMsg && (
+                                                                    <div className="ca-turn-user">
+                                                                        <span className="ca-turn-label">👤</span>
+                                                                        <span>{userMsg}</span>
+                                                                    </div>
+                                                                )}
+                                                                {botMsg && (
+                                                                    <div className="ca-turn-bot">
+                                                                        <span className="ca-turn-label">🤖</span>
+                                                                        <span>{botMsg}</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                 </div>
             </main>
         </div>

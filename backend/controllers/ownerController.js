@@ -611,6 +611,86 @@ const getAvgRatings = async (req, res) => {
   }
 };
 
+const getOnlineOrderConversionRate = async (req, res) => {
+  try {
+    const { shop_id } = req.body;
+
+    if (!shop_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Shop ID is required",
+      });
+    }
+
+    const onlineOrdersQuery = await pool.query(
+      `
+        SELECT
+          COUNT(*)::INT AS online_orders,
+          COUNT(*) FILTER (
+            WHERE (
+              full_analysis -> 'payment_status' ->> 'completed' = 'true'
+              OR full_analysis ->> 'outcome' = 'PAYMENT_COMPLETED'
+            )
+          )::INT AS paid_online_orders,
+          ROUND(
+            100.0 * COUNT(*) FILTER (
+              WHERE (
+                full_analysis -> 'payment_status' ->> 'completed' = 'true'
+                OR full_analysis ->> 'outcome' = 'PAYMENT_COMPLETED'
+              )
+            ) / NULLIF(COUNT(*), 0),
+            2
+          ) AS conversion_rate
+        FROM public.conversation_analyses
+        WHERE shop_id = $1::text
+      `,
+      [String(shop_id)]
+    );
+
+    const offlineOrdersQuery = await pool.query(
+      `
+        SELECT COUNT(*)::INT AS offline_orders
+        FROM public.orders
+        WHERE shop_id = $1::text
+      `,
+      [String(shop_id)]
+    );
+
+    const onlineRow = onlineOrdersQuery.rows[0] || {
+      online_orders: 0,
+      paid_online_orders: 0,
+      conversion_rate: 0,
+    };
+
+    const offlineRow = offlineOrdersQuery.rows[0] || {
+      offline_orders: 0,
+    };
+
+    const onlineOrders = Number(onlineRow.online_orders || 0);
+    const offlineOrders = Number(offlineRow.offline_orders || 0);
+    const paidOnlineOrders = Number(onlineRow.paid_online_orders || 0);
+    const conversionRate = Number(onlineRow.conversion_rate || 0);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        online_orders: onlineOrders,
+        offline_orders: offlineOrders,
+        total_orders: onlineOrders + offlineOrders,
+        paid_online_orders: paidOnlineOrders,
+        conversion_rate: conversionRate,
+      },
+    });
+  } catch (error) {
+    console.error("Get online order conversion rate error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 const logoutOwner = async (req, res) => {
   try {
     const { refresh_token } = req.body;
@@ -2422,6 +2502,7 @@ module.exports = {
   getOwnerProfile,
   getFeedBack,
   getAvgRatings,
+  getOnlineOrderConversionRate,
   logoutOwner,
   getProducts,
   addProduct,

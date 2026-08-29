@@ -36,6 +36,8 @@ const Voice = ({ onClose, isPage = false }) => {
   const [cartQuantity, setCartQuantity]             = useState(1);
   const [spendingLimit, setSpendingLimit]           = useState(null);
   const [limitInput, setLimitInput]                 = useState("");
+  const [productCardsDialog, setProductCardsDialog] = useState([]);
+  const [showProductCards, setShowProductCards]     = useState(false);
 
   const lastTranscriptRef      = useRef("");
   const pauseTimeoutRef        = useRef(null);
@@ -226,6 +228,7 @@ const Voice = ({ onClose, isPage = false }) => {
           should_speak: shouldSpeak = true,
           checkout_action: checkoutAction = null,
           spending_limit: updatedLimit = null,
+          product_cards: pCards = [],
         } = data;
 
         if (updatedLimit !== null && updatedLimit !== undefined) {
@@ -275,6 +278,12 @@ const Voice = ({ onClose, isPage = false }) => {
           setAwaitingImage(false);
           setImageContext("");
           setImagePromptMsg("");
+        }
+
+        // ── Product cards dialog (voice shows a bottom sheet) ────────────
+        if (pCards && pCards.length > 0) {
+          setProductCardsDialog(pCards);
+          setShowProductCards(true);
         }
 
         if (responseText) {
@@ -564,32 +573,36 @@ const Voice = ({ onClose, isPage = false }) => {
     <div className={isPage ? "voice-page-wrapper" : "voice-modal-overlay"}>
       <div className={isPage ? "voice-page-container" : "voice-modal"}>
 
-        {!showCartDialog && (
-          <button
-            className="voice-cart-fab"
-            onClick={async () => {
-              await fetchCartItems();
-              setSelectedCartProduct(null);
-              setCartSearchResults([]);
-              setShowCartDialog(true);
-            }}
-            title="Open cart"
-          >
-            🛒
-          </button>
-        )}
-
         {/* ── Fixed header ── */}
         <div className="voice-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <p className="voice-header-title">{isPage ? "ShopMate Text Chat" : "ShopMate Voice"}</p>
+          <div className="voice-header-left">
+            <div className="voice-header-avatar">🎙️</div>
+            <div className="voice-header-info">
+              <p className="voice-header-title">{isPage ? "ShopMate Chat" : "ShopMate Voice"}</p>
+              <p className="voice-header-subtitle">AI Shopping Assistant</p>
+            </div>
             {spendingLimit !== null && (
-              <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 600, background: 'rgba(16,185,129,0.15)', padding: '2px 8px', borderRadius: '12px' }}>
-                Limit: ₹{Number(spendingLimit).toLocaleString()}
-              </span>
+              <span className="voice-limit-pill">₹{Number(spendingLimit).toLocaleString()}</span>
             )}
           </div>
-          <button className="voice-modal-close" onClick={handleClose}>×</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="voice-header-cart-btn"
+              onClick={async () => {
+                await fetchCartItems();
+                setSelectedCartProduct(null);
+                setCartSearchResults([]);
+                setShowCartDialog(true);
+              }}
+              title="Open cart"
+            >
+              🛒
+              {cartProducts.length > 0 && (
+                <span className="voice-cart-badge">{cartProducts.length}</span>
+              )}
+            </button>
+            <button className="voice-modal-close" onClick={handleClose}>×</button>
+          </div>
         </div>
 
         {/* ── Scrollable body ── */}
@@ -597,15 +610,17 @@ const Voice = ({ onClose, isPage = false }) => {
 
           {/* Mic + status */}
           <div className="voice-top-section">
-            <button className="voice-mic-button" onClick={toggleRecording}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                   className={`voice-mic-icon ${listening && !isMuted ? "recording" : ""}`}>
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8"  y1="23" x2="16" y2="23" />
-              </svg>
-            </button>
+            <div className={`voice-mic-ring ${listening && !isMuted ? "active" : ""}`}>
+              <button className={`voice-mic-button ${listening && !isMuted ? "recording" : ""}`} onClick={toggleRecording}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                     className={`voice-mic-icon ${listening && !isMuted ? "recording" : ""}`}>
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8"  y1="23" x2="16" y2="23" />
+                </svg>
+              </button>
+            </div>
             <p className="voice-status">{status}</p>
           </div>
 
@@ -884,6 +899,51 @@ const Voice = ({ onClose, isPage = false }) => {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Product Cards Dialog (bottom sheet) ── */}
+        {showProductCards && productCardsDialog.length > 0 && (
+          <div className="wl-dialog-overlay" onClick={() => setShowProductCards(false)}>
+            <div className="wl-dialog pc-voice-dialog" onClick={e => e.stopPropagation()}>
+              <div className="wl-dialog-header">
+                <span className="wl-dialog-icon">🛍️</span>
+                <div>
+                  <p className="wl-dialog-title">Products for you</p>
+                  <p className="wl-dialog-sub">{productCardsDialog.length} item{productCardsDialog.length > 1 ? 's' : ''} found</p>
+                </div>
+                <button className="wl-dialog-close" onClick={() => setShowProductCards(false)}>✕</button>
+              </div>
+              <div className="pc-voice-list">
+                {productCardsDialog.map((card, i) => (
+                  <div key={card.product_id ?? i} className="pc-voice-card">
+                    <div className="pc-voice-img-wrap">
+                      {(card.image || (card.images && card.images[0]))
+                        ? <img src={card.image || card.images[0]} alt={card.product_name} className="pc-voice-img" />
+                        : <div className="pc-voice-img-ph">🛍️</div>
+                      }
+                    </div>
+                    <div className="pc-voice-info">
+                      <p className="pc-voice-name">{card.product_name}</p>
+                      {card.brand && <p className="pc-voice-brand">{card.brand}</p>}
+                      {card.description && <p className="pc-voice-desc">{card.description}</p>}
+                      <div className="pc-voice-footer">
+                        {card.price != null && (
+                          <span className="pc-voice-price">₹{Number(card.price).toLocaleString()}</span>
+                        )}
+                        {card.category && <span className="pc-voice-cat">{card.category}</span>}
+                      </div>
+                      {card.shop_name && (
+                        <p className="pc-voice-shop">🏪 {card.shop_name}{card.shop_city ? `, ${card.shop_city}` : ''}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '10px 12px 14px' }}>
+                <button className="wl-cancel-btn" onClick={() => setShowProductCards(false)}>Close</button>
+              </div>
             </div>
           </div>
         )}

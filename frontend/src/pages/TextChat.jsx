@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from 'react-router-dom';
 import "../styles/TextChat.css";
-import "../styles/TextChat.css";
 
 function TextChat({ onClose, isPage = false }) {
   const navigate = useNavigate();
@@ -175,7 +174,8 @@ function TextChat({ onClose, isPage = false }) {
         cart_products: cProducts = [],
         should_speak: shouldSpeak = true,
         checkout_action: checkoutAction = null,
-        spending_limit: updatedLimit = null
+        spending_limit: updatedLimit = null,
+        product_cards: pCards = [],
       } = data;
 
       if (updatedLimit !== null && updatedLimit !== undefined) {
@@ -244,7 +244,8 @@ function TextChat({ onClose, isPage = false }) {
           id: Date.now() + 1,
           sender: 'bot',
           text: responseText,
-          recommendations: data.recommendations || []
+          recommendations: data.recommendations || [],
+          product_cards: pCards,
         }]);
       }
     } catch (err) {
@@ -535,22 +536,157 @@ function TextChat({ onClose, isPage = false }) {
     );
   };
 
+  const normalizeProductImage = (data) => {
+    if (!data) return null;
+
+    try {
+      let base64String = '';
+
+      if (data && data.type === 'Buffer' && Array.isArray(data.data)) {
+        const uint8 = new Uint8Array(data.data);
+        base64String = btoa(String.fromCharCode.apply(null, uint8));
+      } else if (typeof data === 'string') {
+        const clean = data.trim().replace(/['"]+/g, '');
+
+        if (clean.includes('base64,ZGF0Y')) {
+          const encodedPart = clean.split('base64,')[1];
+          return normalizeProductImage(atob(encodedPart));
+        }
+
+        if (clean.startsWith('data:image')) return clean;
+        if (clean.startsWith('\\x')) {
+          const bytes = clean.slice(2).match(/.{1,2}/g);
+          if (!bytes) return null;
+          let binary = '';
+          bytes.forEach(byte => { binary += String.fromCharCode(parseInt(byte, 16)); });
+          base64String = btoa(binary);
+        } else if (/^(https?:\/\/|blob:|\/)/i.test(clean)) {
+          return clean;
+        } else {
+          base64String = clean;
+        }
+      } else {
+        return null;
+      }
+
+      return base64String.startsWith('data:image')
+        ? base64String
+        : `data:image/jpeg;base64,${base64String}`;
+    } catch (error) {
+      console.error('Error processing product image:', error);
+      return null;
+    }
+  };
+
+  const getCardImages = (card) => {
+    const values = [
+      ...(Array.isArray(card.images) ? card.images : []),
+      card.image,
+      card.image1,
+      card.image2,
+      card.image3,
+      card.image4,
+      card.image5,
+    ];
+
+    return [...new Set(values.map(normalizeProductImage).filter(Boolean))];
+  };
+
+  const getCardFeatures = (card) => {
+    if (Array.isArray(card.features)) return card.features.filter(Boolean).slice(0, 5);
+    if (card.features && typeof card.features === 'object') {
+      return Object.entries(card.features).map(([key, value]) => `${key.replace(/_/g, ' ')}: ${value}`).slice(0, 5);
+    }
+
+    return Object.entries(card)
+      .filter(([key, value]) => (
+        value !== null && value !== undefined && value !== '' &&
+        !['product_id', 'product_name', 'price', 'brand', 'description', 'category', 'quantity', 'shop_name', 'shop_city', 'image', 'images', 'features'].includes(key) &&
+        !key.startsWith('image')
+      ))
+      .map(([key, value]) => `${key.replace(/_/g, ' ')}: ${value}`)
+      .slice(0, 5);
+  };
+
+  const renderProductCards = (cards) => {
+    if (!cards || cards.length === 0) return null;
+    return (
+      <div className="pc-carousel">
+        {cards.map((card, i) => {
+          const images = getCardImages(card);
+          const img1 = images[0];
+          const img2 = images[1];
+          const features = getCardFeatures(card);
+          return (
+            <div key={card.product_id ?? i} className="pc-card">
+              <div className="pc-img-wrap">
+                {img1
+                  ? <img src={img1} alt={card.product_name} className="pc-img" onError={(event) => {
+                      event.currentTarget.style.display = "none";
+                      event.currentTarget.nextElementSibling?.removeAttribute("hidden");
+                    }} />
+                  : <div className="pc-img-placeholder">🛍️</div>
+                }
+                {img1 && <div className="pc-img-placeholder" hidden>🛍️</div>}
+                {img2 && (
+                  <div className="pc-img-secondary-wrap">
+                    <img src={img2} alt="" className="pc-img-secondary" />
+                  </div>
+                )}
+                {card.category && <span className="pc-badge">{card.category}</span>}
+              </div>
+              <div className="pc-body">
+                <p className="pc-name">{card.product_name}</p>
+                {card.brand && <p className="pc-brand">{card.brand}</p>}
+                {card.description && <p className="pc-desc">{card.description}</p>}
+                {features.length > 0 && (
+                  <ul className="pc-features">
+                    {features.map((feature, featureIndex) => (
+                      <li key={`${feature}-${featureIndex}`}>{feature}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="pc-footer">
+                  {card.price != null && (
+                    <span className="pc-price">₹{Number(card.price).toLocaleString()}</span>
+                  )}
+                  {card.quantity != null && (
+                    <span className="pc-stock">{Number(card.quantity) > 0 ? 'In stock' : 'Out of stock'}</span>
+                  )}
+                </div>
+                {card.shop_name && (
+                  <p className="pc-shop">🏪 {card.shop_name}{card.shop_city ? `, ${card.shop_city}` : ''}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="textchat-container">
       {/* Header */}
       <div className="textchat-header">
-        <button className="textchat-back-btn" onClick={handleClose}>
-          ← Back
-        </button>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <h1 className="textchat-title">ShopMate Chat</h1>
-          {spendingLimit !== null && (
-            <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 600, background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: '12px' }}>
-              Limit: ₹{Number(spendingLimit).toLocaleString()}
-            </span>
+        <button className="textchat-back-btn" onClick={handleClose}>← Back</button>
+        <div className="textchat-header-logo">🛍️</div>
+        <h1 className="textchat-title">ShopMate Chat</h1>
+        <div className="textchat-spacer" />
+        {spendingLimit !== null && (
+          <span className="tc-limit-pill">₹{Number(spendingLimit).toLocaleString()}</span>
+        )}
+        <button
+          className="textchat-cart-fab"
+          onClick={handleOpenCart}
+          title="Open cart"
+          aria-label={`Open cart${cartProducts.length > 0 ? `, ${cartProducts.length} items` : ''}`}
+        >
+          <span aria-hidden="true">🛒</span>
+          {cartProducts.length > 0 && (
+            <span className="tc-cart-badge">{cartProducts.length}</span>
           )}
-        </div>
-        <div className="textchat-spacer"></div>
+        </button>
       </div>
 
       {/* Messages */}
@@ -572,6 +708,7 @@ function TextChat({ onClose, isPage = false }) {
                   <img src={msg.image} alt="Uploaded" className="textchat-image" />
                 )}
                 {renderMessageText(msg.text)}
+                {msg.product_cards && msg.product_cards.length > 0 && renderProductCards(msg.product_cards)}
                 {msg.recommendations && msg.recommendations.length > 0 && (
                   <div className="textchat-rec-container" style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary, #666)' }}>
@@ -735,14 +872,6 @@ function TextChat({ onClose, isPage = false }) {
           </button>
         </div>
       </div>
-
-      <button
-        className="textchat-cart-fab"
-        onClick={handleOpenCart}
-        title="Open cart"
-      >
-        🛒
-      </button>
 
       {/* Wishlist Dialog */}
       {showWishlistDialog && (

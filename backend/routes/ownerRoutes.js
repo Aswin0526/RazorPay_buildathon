@@ -13,6 +13,7 @@ const {
   getFeedBack,
   logoutOwner,
   getAvgRatings,
+  getOnlineOrderConversionRate,
   getProducts,
   addProduct,
   updateProduct,
@@ -49,6 +50,7 @@ router.post("/get-shop-images", getShopImages);
 router.post("/login", loginOwner);
 router.post("/getfeedbacks", verifyToken, getFeedBack);
 router.post("/getAvgRatings", verifyToken, getAvgRatings);
+router.post("/online-order-conversion-rate", verifyToken, isOwner, getOnlineOrderConversionRate);
 
 // Protected routes
 router.get("/profile", verifyToken, isOwner, getOwnerProfile);

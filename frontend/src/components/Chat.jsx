@@ -85,6 +85,18 @@ function Chat({ onClose, onVoiceOpen, onTextOpen }) {
             ...formData,
             globalChat: true,
             mode: 'global',
+            customerEmail: (() => {
+              try {
+                const ud = JSON.parse(localStorage.getItem('user_data') || '{}');
+                return ud.customer_email || ud.email || null;
+              } catch { return null; }
+            })(),
+            customerId: (() => {
+              try {
+                const ud = JSON.parse(localStorage.getItem('user_data') || '{}');
+                return ud.customer_id || null;
+              } catch { return null; }
+            })(),
           },
           portalType,
         }),
