@@ -473,6 +473,7 @@
 @keyframes tcFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .wishlist-dialog {
+  width: min(100%, 520px);
   max-width: 520px;
   background: var(--tc-surface);
   border: 1px solid var(--tc-border);
@@ -571,15 +572,15 @@
   gap: 2px;
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .wishlist-product-name {
   font-size: 0.87rem;
   font-weight: 600;
   color: var(--tc-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .wishlist-product-brand {

@@ -13,6 +13,7 @@ const Stock = ({ Data }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+  const [totalProducts, setTotalProducts] = useState(0);
   const [notification, setNotification] = useState({ show: false, message: '', type: '' });
   const [images, setImages] = useState({ image1: null, image2: null, image3: null, image4: null, image5: null });
   const [previewImage, setPreviewImage] = useState(null);
@@ -42,13 +43,19 @@ const Stock = ({ Data }) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ table_name: tableName, shop_type: Data.type }),
+        body: JSON.stringify({
+          table_name: tableName,
+          shop_type: Data.type,
+          page: currentPage,
+          limit: itemsPerPage,
+        }),
       });
 
       const data = await response.json();
       if (data.success) {
         setProducts(data.data?.products || []);
         setColumns(data.data?.columns || []);
+        setTotalProducts(data.data?.pagination?.total || 0);
       } else {
         setError(data.message || 'Failed to fetch products');
       }
@@ -62,7 +69,7 @@ const Stock = ({ Data }) => {
 
   useEffect(() => {
     fetchProducts();
-  }, [tableName, Data.type]);
+  }, [tableName, Data.type, currentPage, itemsPerPage]);
 
   const filteredProducts = useMemo(() => {
     if (!searchTerm) return products;
@@ -74,12 +81,9 @@ const Stock = ({ Data }) => {
   }, [products, searchTerm]);
 
   // Pagination
-  const paginatedProducts = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredProducts.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredProducts, currentPage, itemsPerPage]);
+  const paginatedProducts = filteredProducts;
 
-  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const totalPages = Math.ceil(totalProducts / itemsPerPage);
 
   const handleInputChange = (e) => {
     const { name, value, type } = e.target;
@@ -467,7 +471,7 @@ const Stock = ({ Data }) => {
       </div>
 
       {/* Pagination */}
-      {filteredProducts.length > itemsPerPage && (
+      {totalProducts > itemsPerPage && (
         <div className="pagination">
           <button
             onClick={() => setCurrentPage(1)}

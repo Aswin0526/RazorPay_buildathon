@@ -27,7 +27,7 @@ from langgraph.graph import StateGraph, END
 
 try:
     from toolbox_core import ToolboxClient
-except Exception:  # pragma: no cover - optional dependency for MCP Toolbox integration
+except Exception: 
     ToolboxClient = None
 
 try:
@@ -50,15 +50,18 @@ DATABASE_URL = (
     f"postgresql+psycopg2://{os.getenv('user')}:{os.getenv('password')}"
     f"@{os.getenv('host')}:{os.getenv('port')}/{os.getenv('dbname')}?sslmode=require"
 )
-MCP_TOOLBOX_URL = os.getenv("MCP_TOOLBOX_URL", "http://127.0.0.1:5005/mcp")
+MCP_TOOLBOX_URL = os.getenv("MCP_TOOLBOX_URL", "http://127.0.0.1:5006/mcp")
 MCP_TOOLBOX_TOOLSET = os.getenv("MCP_TOOLBOX_TOOLSET", "shopmate")
 MCP_TOOLBOX_SQL_TOOL = os.getenv("MCP_TOOLBOX_SQL_TOOL", "execute_sql")
 MCP_TOOLBOX_TIMEOUT = float(os.getenv("MCP_TOOLBOX_TIMEOUT", "5"))
 USE_MCP_TOOLBOX = os.getenv("USE_MCP_TOOLBOX", "true").lower() in {"1", "true", "yes", "on"}
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 # Razorpay credentials
 RZP_KEY_ID = os.getenv("RZP_KEY_ID", "")
 RZP_KEY_SECRET = os.getenv("RZP_KEY_SECRET", "")
+SIMULATE_TIMEOUT = os.getenv("SIMULATE_TIMEOUT", "false").lower() in {"1", "true", "yes", "on"}
+GATEWAY_TIMEOUT_MS = int(os.getenv("GATEWAY_TIMEOUT_MS", "100"))
 
 # Initialize Razorpay client (lazy — only if credentials are present)
 _rzp_client = None
@@ -98,9 +101,9 @@ HARDCODED_RESTRICTED_TABLES = [
 _full_db = SQLDatabase(engine, sample_rows_in_table_info=0)
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-3.5-flash-lite",
+    model=GEMINI_MODEL,
     google_api_key=GEMINI_API_KEY,
-    temperature=0.3
+    max_retries=1
 )
 
 vision_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -134,7 +137,7 @@ Analyze the image carefully and provide:
 Be specific, helpful, and retail-focused. Do not guess beyond what is visible."""
 
         response = vision_client.models.generate_content(
-            model="gemini-3.5-flash-lite",
+            model=GEMINI_MODEL,
             contents=[
                 types.Content(parts=[
                     types.Part(text=prompt),
@@ -1417,30 +1420,315 @@ def format_cart_items_summary(cart_items: list) -> str:
 
 
 # ─────────────────────────────────────────────
-# Orders table — ensure it exists
+# Orders table — ensure schema supports timeout-safe audit trail
 # ─────────────────────────────────────────────
 
-def ensure_orders_table():
-    """Create the online_orders table if it does not already exist."""
+def ensure_online_orders_schema():
+    """Create and upgrade the online_orders table for timeout-safe payment auditing."""
     import sqlalchemy
-    ddl = sqlalchemy.text("""
-        CREATE TABLE IF NOT EXISTS online_orders (
-            order_id SERIAL PRIMARY KEY,
-            razorpay_order_id VARCHAR(255) UNIQUE NOT NULL,
-            razorpay_payment_id VARCHAR(255),
-            user_id INT,
-            total_amount NUMERIC(10,2) NOT NULL,
-            payment_status VARCHAR(50) DEFAULT 'PENDING',
-            items_snapshot JSONB NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
     try:
         with engine.begin() as conn:
-            conn.execute(ddl)
-        logger.info("online_orders table ensured.")
+            conn.execute(sqlalchemy.text("""
+                CREATE TABLE IF NOT EXISTS online_orders (
+                    order_id SERIAL PRIMARY KEY,
+                    razorpay_order_id VARCHAR(255) UNIQUE,
+                    razorpay_payment_id VARCHAR(255),
+                    user_id INT,
+                    total_amount NUMERIC(10,2) NOT NULL,
+                    payment_status VARCHAR(50) DEFAULT 'PENDING',
+                    items_snapshot JSONB NOT NULL,
+                    idempotency_key VARCHAR(255) UNIQUE,
+                    receipt_tag VARCHAR(255),
+                    gateway_error TEXT,
+                    retry_safe BOOLEAN DEFAULT FALSE,
+                    last_reconciliation_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
+
+            for column_sql in [
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255)",
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255)",
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255)",
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS receipt_tag VARCHAR(255)",
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS gateway_error TEXT",
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS retry_safe BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS last_reconciliation_at TIMESTAMP",
+                "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'PENDING'",
+            ]:
+                try:
+                    conn.execute(sqlalchemy.text(column_sql))
+                except Exception:
+                    pass
+
+            try:
+                conn.execute(sqlalchemy.text("CREATE UNIQUE INDEX IF NOT EXISTS online_orders_idempotency_key_uq ON online_orders (idempotency_key)"))
+            except Exception:
+                pass
+
+            try:
+                conn.execute(sqlalchemy.text("CREATE UNIQUE INDEX IF NOT EXISTS online_orders_receipt_tag_uq ON online_orders (receipt_tag)"))
+            except Exception:
+                pass
+
+        logger.info("online_orders schema ensured for timeout-safe state tracking.")
     except Exception as e:
-        logger.error(f"ensure_orders_table error: {e}")
+        logger.error(f"ensure_online_orders_schema error: {e}")
+
+
+def build_idempotency_key(user_id: Optional[int], cart_items: list, salt: Optional[str] = None) -> str:
+    payload = json.dumps({
+        "user_id": user_id,
+        "cart": cart_items,
+        "salt": salt or str(uuid.uuid4()),
+    }, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def update_online_order_status(order_id: int, *, payment_status: str, razorpay_order_id: Optional[str] = None,
+                               gateway_error: Optional[str] = None, retry_safe: Optional[bool] = None,
+                               receipt_tag: Optional[str] = None, razorpay_payment_id: Optional[str] = None) -> None:
+    import sqlalchemy
+    try:
+        with engine.begin() as conn:
+            params = {
+                "order_id": order_id,
+                "payment_status": payment_status,
+                "razorpay_order_id": razorpay_order_id,
+                "gateway_error": gateway_error,
+                "retry_safe": retry_safe if retry_safe is not None else False,
+                "receipt_tag": receipt_tag,
+                "razorpay_payment_id": razorpay_payment_id,
+                "last_reconciliation_at": datetime.utcnow(),
+            }
+            conn.execute(sqlalchemy.text("""
+                UPDATE online_orders
+                SET payment_status = :payment_status,
+                    razorpay_order_id = COALESCE(:razorpay_order_id, razorpay_order_id),
+                    razorpay_payment_id = COALESCE(:razorpay_payment_id, razorpay_payment_id),
+                    gateway_error = :gateway_error,
+                    retry_safe = :retry_safe,
+                    receipt_tag = COALESCE(:receipt_tag, receipt_tag),
+                    last_reconciliation_at = :last_reconciliation_at
+                WHERE order_id = :order_id
+            """), params)
+    except Exception as e:
+        logger.error(f"update_online_order_status failed for order_id={order_id}: {e}")
+
+
+def reconcile_razorpay_timeout(order_db_id: int, receipt_tag: str) -> dict:
+    """Check Razorpay for a recovered order created with the same receipt tag."""
+    logger.info(f"[PAYMENT_TIMEOUT_RECOVERY] Starting reconciliation for order_db_id={order_db_id}, receipt_tag={receipt_tag}")
+    try:
+        rzp = get_razorpay_client()
+        result = rzp.order.all({"receipt": receipt_tag, "count": 10})
+        items = result.get("items", []) if isinstance(result, dict) else []
+        logger.info(f"[PAYMENT_TIMEOUT_RECOVERY] Razorpay lookup returned {len(items)} potential items for receipt={receipt_tag}")
+        if items:
+            matched = next((item for item in items if str(item.get("receipt")) == receipt_tag), None)
+            if matched:
+                logger.info(f"[PAYMENT_TIMEOUT_RECOVERY] Matched Razorpay order id={matched.get('id')} for receipt_tag={receipt_tag}")
+                update_online_order_status(
+                    order_db_id,
+                    payment_status="PENDING",
+                    razorpay_order_id=str(matched.get("id")),
+                    gateway_error="Recovered from Razorpay after timeout",
+                    receipt_tag=receipt_tag,
+                    retry_safe=False,
+                )
+                logger.info(f"[PAYMENT_TIMEOUT_RECOVERY] Updated order_db_id={order_db_id} to PENDING after recovery")
+                return {
+                    "status": "RECOVERED",
+                    "payment_status": "PENDING",
+                    "razorpay_order_id": str(matched.get("id")),
+                }
+
+        logger.warning(f"[PAYMENT_TIMEOUT_RECOVERY] No Razorpay order found for receipt={receipt_tag}; marking FAILED_SAFE")
+        update_online_order_status(
+            order_db_id,
+            payment_status="FAILED_SAFE",
+            gateway_error="Gateway timeout; no Razorpay order found after reconciliation; safe to retry.",
+            receipt_tag=receipt_tag,
+            retry_safe=True,
+        )
+        logger.info(f"[PAYMENT_TIMEOUT_RECOVERY] Updated order_db_id={order_db_id} to FAILED_SAFE with retry_safe=true")
+        return {
+            "status": "FAILED_SAFE",
+            "payment_status": "FAILED_SAFE",
+            "razorpay_order_id": None,
+        }
+    except Exception as e:
+        logger.error(f"[PAYMENT_TIMEOUT_RECOVERY] Razorpay reconciliation failed for receipt {receipt_tag}: {e}")
+        update_online_order_status(
+            order_db_id,
+            payment_status="PENDING_RECONCILIATION",
+            gateway_error=f"Timeout reconciliation failed: {str(e)}",
+            receipt_tag=receipt_tag,
+            retry_safe=False,
+        )
+        logger.info(f"[PAYMENT_TIMEOUT_RECOVERY] Updated order_db_id={order_db_id} to PENDING_RECONCILIATION after reconciliation failure")
+        return {
+            "status": "PENDING_RECONCILIATION",
+            "payment_status": "PENDING_RECONCILIATION",
+            "razorpay_order_id": None,
+        }
+
+
+def create_razorpay_order(total_amount: float, cart_items: list, user_id=None) -> dict:
+    """
+    Create a Razorpay order and persist it in the online_orders table with timeout-safe audit state.
+    Returns a response payload compatible with the existing checkout flow while preserving audit state.
+    """
+    import sqlalchemy
+
+    ensure_online_orders_schema()
+    idempotency_key = build_idempotency_key(user_id, cart_items)
+    logger.info(f"[PAYMENT_FLOW] Starting checkout flow: user_id={user_id}, total_amount={total_amount}, idempotency_key={idempotency_key[:16]}...")
+
+    audit_sql = sqlalchemy.text("""
+        INSERT INTO online_orders (
+            razorpay_order_id, user_id, total_amount, payment_status,
+            items_snapshot, idempotency_key, receipt_tag, gateway_error, retry_safe
+        )
+        VALUES (:razorpay_order_id, :user_id, :total_amount, 'IN_FLIGHT', :items_snapshot, :idempotency_key, NULL, NULL, FALSE)
+        RETURNING order_id
+    """)
+
+    db_id = None
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(audit_sql, {
+                "razorpay_order_id": None,
+                "user_id": user_id,
+                "total_amount": total_amount,
+                "items_snapshot": json.dumps(cart_items),
+                "idempotency_key": idempotency_key,
+            }).fetchone()
+            db_id = row[0] if row else None
+            logger.info(f"[PAYMENT_FLOW] Inserted IN_FLIGHT payment row with order_id={db_id} and idempotency_key={idempotency_key[:16]}...")
+    except Exception as e:
+        logger.error(f"[PAYMENT_FLOW] Failed to save in-flight order to online_orders DB: {e}")
+        raise RuntimeError(f"Payment audit log failed: {e}")
+
+    if db_id is None:
+        raise RuntimeError("Payment audit log failed: no order_id was returned.")
+
+    receipt_tag = f"rcpt_order_{db_id}"
+    with engine.begin() as conn:
+        conn.execute(sqlalchemy.text("UPDATE online_orders SET receipt_tag = :receipt_tag WHERE order_id = :order_id"), {
+            "receipt_tag": receipt_tag,
+            "order_id": db_id,
+        })
+    logger.info(f"[PAYMENT_FLOW] Assigned receipt_tag={receipt_tag} to order_id={db_id}")
+
+    rzp = get_razorpay_client()
+    amount_paise = int(round(total_amount * 100))
+    timeout_seconds = max(GATEWAY_TIMEOUT_MS / 1000.0, 0.05)
+    logger.info(f"[PAYMENT_FLOW] Gateway timeout simulation enabled={SIMULATE_TIMEOUT}, timeout_seconds={timeout_seconds}")
+
+    def create_order_call():
+        return rzp.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "payment_capture": 1,
+            "receipt": receipt_tag,
+        })
+
+    try:
+        if SIMULATE_TIMEOUT:
+            import concurrent.futures
+            logger.warning(f"[PAYMENT_FLOW] Simulating gateway timeout for order_id={db_id}, receipt_tag={receipt_tag}")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(create_order_call)
+                try:
+                    rzp_order = future.result(timeout=timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"[PAYMENT_FLOW] Time limit reached ({timeout_seconds}s); raising timeout for order_id={db_id}")
+                    raise TimeoutError("Gateway network timeout simulated.")
+        else:
+            logger.info(f"[PAYMENT_FLOW] Calling Razorpay normally for order_id={db_id}, receipt_tag={receipt_tag}")
+            rzp_order = create_order_call()
+
+        rzp_order_id = rzp_order.get("id")
+        logger.info(f"[PAYMENT_FLOW] Razorpay accepted the request and returned order_id={rzp_order_id} for order_db_id={db_id}")
+        update_online_order_status(
+            db_id,
+            payment_status="PENDING",
+            razorpay_order_id=str(rzp_order_id),
+            gateway_error=None,
+            retry_safe=False,
+            receipt_tag=receipt_tag,
+        )
+        logger.info(f"[PAYMENT_FLOW] Updated order_db_id={db_id} to PENDING with razorpay_order_id={rzp_order_id}")
+
+        return {
+            "action": "TRIGGER_RAZORPAY_CHECKOUT",
+            "data": {
+                "key_id": RZP_KEY_ID,
+                "order_id": rzp_order_id,
+                "amount": amount_paise,
+                "currency": "INR",
+                "receipt": receipt_tag,
+                "status": "READY",
+            },
+            "order_db_id": db_id,
+            "payment_status": "PENDING",
+        }
+    except TimeoutError as e:
+        logger.warning(f"[PAYMENT_FLOW] Gateway timeout during checkout for order_db_id={db_id}: {e}")
+        update_online_order_status(
+            db_id,
+            payment_status="PENDING_RECONCILIATION",
+            gateway_error=str(e),
+            retry_safe=False,
+            receipt_tag=receipt_tag,
+        )
+        logger.info(f"[PAYMENT_FLOW] Updated order_db_id={db_id} to PENDING_RECONCILIATION before reconciliation")
+
+        recovery = reconcile_razorpay_timeout(db_id, receipt_tag)
+        logger.info(f"[PAYMENT_FLOW] Reconciliation result for order_db_id={db_id}: {recovery}")
+        return {
+            "action": "PAYMENT_TIMEOUT_RECOVERY",
+            "data": {
+                "key_id": RZP_KEY_ID,
+                "order_id": None,
+                "amount": amount_paise,
+                "currency": "INR",
+                "receipt": receipt_tag,
+                "status": recovery.get("status", "PENDING_RECONCILIATION"),
+                "gateway_error": str(e),
+            },
+            "order_db_id": db_id,
+            "payment_status": recovery.get("payment_status", "PENDING_RECONCILIATION"),
+            "reconciliation": recovery,
+        }
+    except Exception as e:
+        logger.error(f"[PAYMENT_FLOW] Razorpay order creation failed for order_db_id={db_id}: {e}")
+        update_online_order_status(
+            db_id,
+            payment_status="PENDING_RECONCILIATION",
+            gateway_error=str(e),
+            retry_safe=False,
+            receipt_tag=receipt_tag,
+        )
+
+        recovery = reconcile_razorpay_timeout(db_id, receipt_tag)
+        logger.info(f"[PAYMENT_FLOW] Reconciliation result after exception for order_db_id={db_id}: {recovery}")
+        return {
+            "action": "PAYMENT_TIMEOUT_RECOVERY",
+            "data": {
+                "key_id": RZP_KEY_ID,
+                "order_id": None,
+                "amount": amount_paise,
+                "currency": "INR",
+                "receipt": receipt_tag,
+                "status": recovery.get("status", "PENDING_RECONCILIATION"),
+                "gateway_error": str(e),
+            },
+            "order_db_id": db_id,
+            "payment_status": recovery.get("payment_status", "PENDING_RECONCILIATION"),
+            "reconciliation": recovery,
+        }
 
 
 # ─────────────────────────────────────────────
@@ -1603,9 +1891,6 @@ def create_razorpay_order(total_amount: float, cart_items: list, user_id=None) -
     }
 
 
-# ─────────────────────────────────────────────
-# LangGraph + Gemini + MCP-like Toolbox Agent
-# ─────────────────────────────────────────────
 class RetailAgentState(TypedDict):
     session: Dict
     user_message: str
@@ -1620,9 +1905,9 @@ class RetailAgentState(TypedDict):
     final_text: str
     product_cards: List[Dict]
     # Spending limit & checkout
-    spending_limit_set: bool          # True after user provided a limit this turn
-    checkout_action: Optional[Dict]   # Populated when Razorpay order is created
-    sql_was_empty: bool               # Flag from tool_node
+    spending_limit_set: bool          
+    checkout_action: Optional[Dict]   
+    sql_was_empty: bool        
 
 
 
@@ -1780,6 +2065,22 @@ class LangGraphRetailAgent:
                 location_arg = tool_args.get("location")
                 sql_results = execute_toolbox_tool(tool_name, tool_args, self.table_name)
 
+                if (
+                    tool_name in {"search_products", "stock_check", "price_lookup"}
+                    and tool_args.get("keyword")
+                    and tool_args.get("category")
+                    and is_empty_sql_result(sql_results)
+                ):
+                    keyword_only_args = {k: v for k, v in tool_args.items() if k != "category"}
+                    keyword_only_results = execute_toolbox_tool(
+                        tool_name, keyword_only_args, self.table_name
+                    )
+                    if not is_empty_sql_result(keyword_only_results):
+                        logger.info(
+                            "Category-constrained search was empty; keyword-only fallback succeeded"
+                        )
+                        sql_results = keyword_only_results
+
                 # Location-based fallback for global search:
                 # If searching global view with a location filter gave no results, retry without location
                 if self.table_name == "global_products_view" and location_arg:
@@ -1868,7 +2169,7 @@ class LangGraphRetailAgent:
                             shop_filter_context
                         )
 
-                # Fallback 2: search using sql_results if available
+          
                 if not cart_products and sql_results and not sql_was_empty:
                     cart_products = search_products_for_wishlist(
                         sql_results,
@@ -1883,7 +2184,7 @@ class LangGraphRetailAgent:
                     cart_recommendations = rec_result.get("recommendations", [])
                     rec_context = rec_result.get("recommendation_text", "")
 
-            # Parse sql_results into product cards (with images) if we have data
+        
             product_cards: List[Dict] = []
             if sql_results and not sql_was_empty:
                 product_cards = parse_sql_results_to_cards(sql_results, self.table_name)
@@ -1990,7 +2291,7 @@ class LangGraphRetailAgent:
                     "checkout_action": None,
                 }
 
-        # ── Spending-limit confirmation message (just set this turn) ─────────
+
         if spending_limit_just_set:
             confirm_msg = (
                 f"Got it! Your spending limit for this session is set to ₹{spending_limit:,.0f}. "
@@ -2134,7 +2435,6 @@ class LangGraphRetailAgent:
                     "spending_limit_set": False, "checkout_action": None,
                 }
 
-            # Cart total is within limit — create Razorpay order
             try:
                 user_id = self.session.get("user_id")
                 checkout_result = create_razorpay_order(cart_total, cart_items, user_id=user_id)
@@ -3834,6 +4134,4 @@ def payment_verify():
 
 if __name__ == "__main__":
     logger.info("Starting ShopMate Conversational Retail Assistant")
-    # Ensure the orders table exists before accepting requests
-    ensure_orders_table()
     app.run(port=os.getenv("PORT_SERVER") or 3000, debug=True)

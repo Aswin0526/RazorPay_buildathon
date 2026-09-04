@@ -640,7 +640,7 @@ const handleCloseConvDrawer = () => {
                                     })}
                                 </div>
 
-                                <div className="conversion-card" style={{
+                                {/* <div className="conversion-card" style={{
                                     marginTop: '18px',
                                     padding: '16px',
                                     borderRadius: '12px',
@@ -668,7 +668,7 @@ const handleCloseConvDrawer = () => {
                                             {conversionMeta.online_orders} online • {conversionMeta.offline_orders} offline
                                         </div>
                                     </div>
-                                </div>
+                                </div> */}
                             </div>
                         </section>
 

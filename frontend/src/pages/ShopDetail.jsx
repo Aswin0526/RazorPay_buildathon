@@ -22,6 +22,7 @@ function ShopDetail() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+  const [totalProducts, setTotalProducts] = useState(0);
 
   const [wishlist, setWishlist] = useState(new Set());
   const [wishlistLoading, setWishlistLoading] = useState({});
@@ -235,7 +236,12 @@ function ShopDetail() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ table_name: tableName, shop_type: shopType }),
+        body: JSON.stringify({
+          table_name: tableName,
+          shop_type: shopType,
+          page: currentPage,
+          limit: itemsPerPage,
+        }),
       });
 
       const data = await response.json();
@@ -243,6 +249,7 @@ function ShopDetail() {
       if (data.success) {
         setProducts(data.data?.products || []);
         setColumns(data.data?.columns || []);
+        setTotalProducts(data.data?.pagination?.total || 0);
       } else {
         setError(data.message || 'Failed to fetch products');
       }
@@ -258,7 +265,7 @@ function ShopDetail() {
     if (tableName) {
       fetchProducts();
     }
-  }, [tableName]);
+  }, [tableName, currentPage, itemsPerPage]);
 
   const filteredProducts = useMemo(() => {
     if (!searchTerm) return products;
@@ -269,12 +276,9 @@ function ShopDetail() {
     );
   }, [products, searchTerm]);
 
-  const paginatedProducts = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredProducts.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredProducts, currentPage, itemsPerPage]);
+  const paginatedProducts = filteredProducts;
 
-  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const totalPages = Math.ceil(totalProducts / itemsPerPage);
 
   const displayColumns = useMemo(() => {
     return columns.filter(col => {
@@ -1040,7 +1044,7 @@ function ShopDetail() {
       </div>
 
       {/* Pagination */}
-      {filteredProducts.length > itemsPerPage && (
+      {totalProducts > itemsPerPage && (
         <div className="pagination">
           <button
             onClick={() => setCurrentPage(1)}

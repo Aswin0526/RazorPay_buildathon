@@ -17,6 +17,11 @@ const base64ToBuffer = (base64String) => {
   return Buffer.from(base64Data, "base64");
 };
 
+const productTableMetadata = new Map();
+const productTableIndexes = new Set();
+
+const quoteIdentifier = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
+
 const createProductTable = async (shopType, shopId, shopName) => {
   const normalizedShopName = shopName
     .trim()
@@ -146,6 +151,10 @@ const createProductTable = async (shopType, shopId, shopName) => {
   }
 
   await pool.query(createTableSQL);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(`${tableName}_created_at_idx`)}
+     ON ${quoteIdentifier(tableName)} (created_at DESC)`
+  );
   await pool.query("SELECT refresh_global_products_view()");
   return tableName;
 };
@@ -1235,7 +1244,7 @@ const getShopImages = async (req, res) => {
 // Get products from shop's product table
 const getProducts = async (req, res) => {
   try {
-    const { table_name, shop_type } = req.body;
+    const { table_name, shop_type, page = 1, limit = 10 } = req.body;
 
     if (!table_name) {
       return res.status(400).json({
@@ -1244,26 +1253,50 @@ const getProducts = async (req, res) => {
       });
     }
 
-    // Get column information from information_schema
-    const columnsResult = await pool.query(
-      `SELECT column_name, data_type 
-       FROM information_schema.columns 
-       WHERE table_name = $1 
-       ORDER BY ordinal_position`,
-      [table_name]
-    );
+    const safeTableName = quoteIdentifier(table_name);
+    let columns = productTableMetadata.get(table_name);
 
-    if (columnsResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Table not found",
-      });
+    if (!columns) {
+      const columnsResult = await pool.query(
+        `SELECT column_name, data_type
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = $1
+         ORDER BY ordinal_position`,
+        [table_name]
+      );
+
+      if (columnsResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Table not found",
+        });
+      }
+
+      columns = columnsResult.rows;
+      productTableMetadata.set(table_name, columns);
     }
 
-    // Get products from the table
-    const productsResult = await pool.query(
-      `SELECT * FROM ${table_name} ORDER BY created_at DESC`
-    );
+    if (!productTableIndexes.has(table_name)) {
+      await pool.query(
+        `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(`${table_name}_created_at_idx`)}
+         ON ${safeTableName} (created_at DESC)`
+      );
+      productTableIndexes.add(table_name);
+    }
+
+    const pageNumber = Math.max(Number.parseInt(page, 10) || 1, 1);
+    const pageSize = Math.min(Math.max(Number.parseInt(limit, 10) || 10, 1), 100);
+    const offset = (pageNumber - 1) * pageSize;
+
+    const [productsResult, countResult] = await Promise.all([
+      pool.query(
+        `SELECT * FROM ${safeTableName}
+         ORDER BY created_at DESC
+         LIMIT $1 OFFSET $2`,
+        [pageSize, offset]
+      ),
+      pool.query(`SELECT COUNT(*)::INTEGER AS total FROM ${safeTableName}`),
+    ]);
 
     const products = productsResult.rows.map((product) => {
       const productCopy = { ...product };
@@ -1291,7 +1324,13 @@ const getProducts = async (req, res) => {
       success: true,
       data: {
         products,
-        columns: columnsResult.rows,
+        columns,
+        pagination: {
+          page: pageNumber,
+          limit: pageSize,
+          total: countResult.rows[0].total,
+          totalPages: Math.ceil(countResult.rows[0].total / pageSize),
+        },
       },
     });
   } catch (error) {

@@ -12,6 +12,7 @@ langchain-community
 langchain-google-genai
 langgraph
 toolbox-core
+fastmcp
 
 # Database & ORM
 sqlalchemy
