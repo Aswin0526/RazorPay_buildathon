@@ -506,50 +506,9 @@ Shop Owner Dashboard
 
 ---
 
-### AI Agent Process Flow
+### LangGraph Process Flow
 
-```
-User Input (Voice/Text)
-        │
-        ▼
-┌───────────────────┐
-│  Intent and       │
-│  Context Routing  │
-│  (LangGraph       │
-│  StateGraph)      │
-└────────┬──────────┘
-         │
-    ┌────┴────┬─────────────────┬──────────────────┐
-    │         │                 │                  │
-    ▼         ▼                 ▼                  ▼
-┌────────┐ ┌──────────┐ ┌─────────────┐ ┌─────────────────┐
-│ SMALL  │ │  DATA    │ │ OUT OF      │ │  (Default)      │
-│ TALK   │ │  QUERY   │ │ DOMAIN      │ │  SMALL TALK     │
-└───┬────┘ └────┬─────┘ └───────┬─────┘ └─────────────────┘
-    │           │               │
-    │           ▼               │
-    │    ┌─────────────┐        │
-   │    │ MCP Tool    │        │
-   │    │ Selection   │        │
-   │    │ (FastMCP)   │        │
-    │    └──────┬──────┘        │
-    │           │               │
-    │    ┌──────▼──────┐        │
-   │    │ Execute Read-Only SQL │        │
-   │    │ (MCP + PostgreSQL)    │        │
-    │    └──────┬──────┘        │
-    │           │               │
-    └───────────┴───────────────┘
-                │
-                ▼
-    ┌─────────────────────┐
-   │  Resolve Agent State │
-   │  (Grounded Output)   │
-    └──────────┬──────────┘
-               │
-               ▼
-        Display to User
-```
+![LangGraph process flow](flowcharts/langgraph.jpg)
 
 ### Intent Classification
 - **SMALL_TALK**: Greetings, general conversation
