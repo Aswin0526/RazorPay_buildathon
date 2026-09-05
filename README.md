@@ -1,14 +1,10 @@
-# ShopMate
+# ShopMate: AI Agentic Commerce Experience
 
-A voice-enabled assistant to guide customers through store navigation and provide product information when store staff are unavailable, enhancing self-service and customer experience.
+ShopMate is an AI agentic commerce experience that turns natural-language, voice, and image input into grounded commerce actions. The system combines Gemini reasoning, LangGraph orchestration, MCP tools, PostgreSQL data access, and Razorpay checkout into one stateful assistant runtime.
 
-<img src="./flowcharts/ps.png">
+The agent can interpret intent, retrieve verified catalog and availability data, analyze product images, maintain session state, and initiate payment workflows. Its focus is tool-using intelligence and reliable execution rather than static conversational responses.
 
 ---
-
-## Architecture Diagram
-
-<img src="./flowcharts/architecture.png" />
 
 ## Tech Stack
 
@@ -31,9 +27,12 @@ A voice-enabled assistant to guide customers through store navigation and provid
 - **Framework**: Flask (Python)
 - **AI/ML**:
   - Google Gemini 2.5 Flash (LLM)
-  - LangChain (SQL query generation)
+   - LangGraph (stateful agent orchestration)
+   - LangChain (prompts, tools, and SQL utilities)
   - Sentence Transformers (Intent classification)
-- **Database**: PostgreSQL (SQLAlchemy)
+- **Tool Protocol**: MCP / FastMCP / MCP Toolbox
+- **Payments**: Razorpay Orders API
+- **Database**: PostgreSQL via SQLAlchemy
 - **Package Manager**: pip
 
 ### Database
@@ -95,26 +94,15 @@ ShopMate/
 
 ## Features
 
-### Customer Features
-- 🔊 **Voice-enabled shopping assistant** - Ask about products using voice
-- 🛒 **Product search** - Find products by name, category, brand
-- 📍 **Store navigation** - Locate products within the store
-- 💰 **Price information** - Get real-time pricing
-- 📦 **Stock availability** - Check product availability
-- 🗺️ **Interactive maps** - Visual store layout
-
-### Shop Owner Features
-- 📊 **Dashboard** - Overview of shop performance
-- 📦 **Inventory management** - Add/update/remove products
-- 🛒 **Order management** - View and process orders
-- 📈 **Analytics** - Sales and stock reports
-
-### AI Chatbot Capabilities
-- 🎯 **Intent classification** - Understand user queries
-- 💬 **Natural language processing** - Human-like responses
-- 🔍 **SQL generation** - Dynamic database queries
-- ⏱️ **Rate limiting** - Prevent spam/abuse
-- 👤 **Session management** - Personalized interactions
+### Agentic Runtime
+- **Multimodal input**: Voice, text, and product images are normalized into agent context.
+- **LangGraph orchestration**: Stateful nodes route intent, retrieval, image analysis, response generation, and commerce actions.
+- **MCP tool access**: FastMCP exposes constrained read-only SQL tools, while MCP Toolbox provides the database toolset to the agent.
+- **Grounded retrieval**: Product, catalog, inventory, location, and order context is retrieved from PostgreSQL instead of being invented by the model.
+- **Razorpay checkout**: The agent can create payment orders and return the checkout payload required by the frontend.
+- **Payment reliability**: Idempotency keys, in-flight audit records, timeout handling, and Razorpay reconciliation prevent duplicate or ambiguous checkout states.
+- **Session-aware interaction**: Chat history, session timeouts, rate limiting, and structured agent state are maintained across requests.
+- **Guarded data access**: MCP SQL execution is limited to approved tables and read-only `SELECT` statements.
 
 ---
 
@@ -305,6 +293,20 @@ FLASK_PORT=3000
 SECRET_KEY=your-flask-secret-key
 SESSION_TIMEOUT=3600
 RATE_LIMIT_SECONDS=3
+
+# Agent and MCP Tooling
+GEMINI_MODEL=gemini-3.5-flash-lite
+USE_MCP_TOOLBOX=true
+MCP_TOOLBOX_URL=http://127.0.0.1:5006/mcp
+MCP_TOOLBOX_TOOLSET=shopmate
+MCP_TOOLBOX_SQL_TOOL=execute_sql
+MCP_TOOLBOX_TIMEOUT=5
+
+# Razorpay Checkout
+RZP_KEY_ID=your-razorpay-key-id
+RZP_KEY_SECRET=your-razorpay-key-secret
+SIMULATE_TIMEOUT=false
+GATEWAY_TIMEOUT_MS=100
 ```
 
 ### Frontend (.env)
@@ -317,7 +319,7 @@ VITE_CHATBOT_URL=http://localhost:3000
 
 ## Complete Process Flow
 
-This section provides a comprehensive overview of the ShopMate application flow, including all pages, functionalities, and user interactions.
+This section describes the end-to-end agentic runtime: authenticated context enters the application, the LangGraph orchestrator selects tools and reasoning steps, and the frontend receives grounded data or an executable commerce action.
 
 ### User Access Flow
 
@@ -504,17 +506,17 @@ Shop Owner Dashboard
 
 ---
 
-### AI Chatbot Process Flow
+### AI Agent Process Flow
 
 ```
 User Input (Voice/Text)
         │
         ▼
 ┌───────────────────┐
-│  Intent           │
-│  Classification   │
-│  (Sentence        │
-│  Transformers)    │
+│  Intent and       │
+│  Context Routing  │
+│  (LangGraph       │
+│  StateGraph)      │
 └────────┬──────────┘
          │
     ┌────┴────┬─────────────────┬──────────────────┐
@@ -527,22 +529,22 @@ User Input (Voice/Text)
     │           │               │
     │           ▼               │
     │    ┌─────────────┐        │
-    │    │ SQL Query   │        │
-    │    │ Generation  │        │
-    │    │ (LangChain) │        │
+   │    │ MCP Tool    │        │
+   │    │ Selection   │        │
+   │    │ (FastMCP)   │        │
     │    └──────┬──────┘        │
     │           │               │
     │    ┌──────▼──────┐        │
-    │    │ Execute SQL │        │
-    │    │ (PostgreSQL)│        │
+   │    │ Execute Read-Only SQL │        │
+   │    │ (MCP + PostgreSQL)    │        │
     │    └──────┬──────┘        │
     │           │               │
     └───────────┴───────────────┘
                 │
                 ▼
     ┌─────────────────────┐
-    │  Format Response    │
-    │  (Natural Language) │
+   │  Resolve Agent State │
+   │  (Grounded Output)   │
     └──────────┬──────────┘
                │
                ▼
@@ -551,8 +553,16 @@ User Input (Voice/Text)
 
 ### Intent Classification
 - **SMALL_TALK**: Greetings, general conversation
-- **DATA_QUERY**: Product searches, prices, stock, inventory
-- **OUT_OF_DOMAIN**: Non-shop related questions
+- **DATA_QUERY**: Product discovery, pricing, availability, and order context
+- **COMMERCE_ACTION**: Checkout and payment actions requiring a tool call
+- **OUT_OF_DOMAIN**: Requests outside the agent's supported context
+
+### Payment Action Flow
+- The agent validates the cart and creates a Razorpay order.
+- The order is recorded as `IN_FLIGHT` before the gateway call.
+- The frontend receives the Razorpay order ID and checkout key.
+- Timeout recovery reconciles the receipt with Razorpay before allowing a retry.
+- Payment state is persisted as `PENDING`, `FAILED_SAFE`, or `PENDING_RECONCILIATION`.
 
 ### Session Management
 - Session ID generated and stored
@@ -588,33 +598,13 @@ Transaction Tables:
 
 ---
 
-### Key Features Summary
+### Agent Capabilities Summary
 
-#### Customer Features
-✅ Voice-enabled shopping assistant  
-✅ Product search by name, category, brand  
-✅ Store navigation and location-based search  
-✅ Real-time pricing and stock availability  
-✅ Wishlist management  
-✅ Order placement and tracking  
-✅ Ratings and feedback  
-✅ Product suggestions ("Most Needed")  
-✅ AI-powered chatbot for product queries  
-
-#### Shop Owner Features
-✅ Dashboard with analytics  
-✅ Inventory management (CRUD operations)  
-✅ Order processing (approve/complete)  
-✅ Feedback management  
-✅ Shop profile updates  
-✅ Image management (logo + gallery)  
-
-
-#### Web UI 
-
-<img src="./flowcharts/UI1.png">
-![alt text](image.png)
-
-<img src="./flowcharts/UI2.png">
-
-<img src="./flowcharts/UI3.png">
+- LangGraph stateful orchestration
+- Gemini reasoning with structured tool calls
+- FastMCP server and MCP Toolbox integration
+- Read-only, allowlisted PostgreSQL retrieval
+- Voice, text, and image-aware interactions
+- Razorpay order creation and checkout handoff
+- Idempotent payment auditing and timeout reconciliation
+- Session memory, rate limiting, and grounded responses
